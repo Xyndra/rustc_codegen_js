@@ -1,0 +1,9 @@
+[package]
+name = "ffi_chars"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+build = "build.rs"
+
+# No dependencies: the backend only needs the pinned nightly toolchain.

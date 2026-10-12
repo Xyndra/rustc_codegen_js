@@ -1,0 +1,9 @@
+[package]
+name = "arith"
+version = "0.0.0"
+edition = "2021"
+publish = false
+build = "build.rs"
+
+# No dependencies: the corpus only needs the pinned nightly toolchain and
+# the JS backend built by the repository's own cargo build.

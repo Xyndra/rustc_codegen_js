@@ -1,0 +1,42 @@
+# All dependency rlibs built under ports/ carry MIR, so the JS backend can
+# emit cross-crate calls (non-generic functions have no MIR in metadata by
+# default). Metadata-only flag: harmless for proc-macro/host builds.
+[build]
+# NOTE: MIR encoding is intentionally disabled for codegened crates. The JS
+# backend never reads upstream MIR — cross-crate call targets are resolved by
+# the fn-name cache. Eager MIR encoding borrows the Steal before our drain, so
+# keeping this flag causes a panic in `body_for`.
+
+# Enable the `codegen-backend` cargo feature (per-package codegen backend).
+[unstable]
+codegen-backend = true
+
+# Per-package JS backend: only these crates are codegened to JS. All other
+# crates (registry deps, proc-macros) compile natively so their build
+# scripts/proc-macro machinery keeps working.
+# Disable MIR encoding for JS crates: eager MIR encoding borrows the query
+# Steals before our drain runs, so the drain's borrow panics. The drain still
+# fetches pre-optimization MIR directly from the query, so bundles are fine.
+[profile.dev.package.dgs]
+codegen-backend = "/run/media/xyndra/Samsung/Code/Rust/rustc_codegen_js/target/release/libcodegen_js.so"
+rustflags = ["-Zalways-encode-mir=false"]
+
+[profile.dev.package.dom]
+codegen-backend = "/run/media/xyndra/Samsung/Code/Rust/rustc_codegen_js/target/release/libcodegen_js.so"
+rustflags = ["-Zalways-encode-mir=false"]
+
+[profile.dev.package.dgs-browser]
+codegen-backend = "/run/media/xyndra/Samsung/Code/Rust/rustc_codegen_js/target/release/libcodegen_js.so"
+rustflags = ["-Zalways-encode-mir=false"]
+
+[profile.dev.package.typst-browser]
+codegen-backend = "/run/media/xyndra/Samsung/Code/Rust/rustc_codegen_js/target/release/libcodegen_js.so"
+rustflags = ["-Zalways-encode-mir=false"]
+
+[profile.dev.package.dgs-playground]
+codegen-backend = "/run/media/xyndra/Samsung/Code/Rust/rustc_codegen_js/target/release/libcodegen_js.so"
+rustflags = ["-Zalways-encode-mir=false"]
+
+[profile.dev.package.dgs-quicktest]
+codegen-backend = "/run/media/xyndra/Samsung/Code/Rust/rustc_codegen_js/target/release/libcodegen_js.so"
+rustflags = ["-Zalways-encode-mir=false"]

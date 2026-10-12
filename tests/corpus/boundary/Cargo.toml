@@ -1,0 +1,9 @@
+[package]
+name = "boundary"
+version = "0.0.0"
+edition = "2021"
+publish = false
+build = "build.rs"
+
+# No dependencies: the boundary test only needs the pinned nightly and the
+# JS backend built by the repository's own cargo build.

@@ -1,0 +1,10 @@
+[package]
+name = "rustc_codegen_js"
+version = "0.1.0"
+edition = "2021"
+description = "rustc codegen backend translating Rust to TypeScript/JavaScript source"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "codegen_js"
+crate-type = ["dylib"]

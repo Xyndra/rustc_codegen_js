@@ -1,0 +1,27 @@
+# Build artifacts
+target/
+Cargo.lock
+*.lock
+
+# Generated bundles & type defs
+ports/target/
+**/out/dgs.mjs
+**/out/*.d.ts
+**/out/*.mjs
+**/out/*.d.ts
+
+# rustc ICE files and debug logs
+rustc-ice-*.txt
+*.panic_message
+**/.rustc_info.json
+
+# Editor / IDE
+.opencode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# User codegen config (secrets / paths)
+codegen-config.toml

@@ -1,0 +1,5 @@
+# Workspace holding the differential corpus packages
+# (`sh tests/diff.sh` builds them all).
+[workspace]
+resolver = "2"
+members = ["arith", "boundary", "collections", "enums", "ffi_chars", "ints", "traits"]
