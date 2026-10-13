@@ -26,6 +26,11 @@ JavaScript by rustc_codegen_js; the Rust code arms these buttons itself.</p>
 <button id="s4" type="button">grid</button>
 <button id="s5" type="button">polygon</button>
 </div>
+<textarea id="cmd" rows="8" cols="70">
+push(point("A", 0, 0))
+push(circle("A", 2))
+</textarea>
+<button id="render" type="button">Render source</button>
 <div id="status"></div>
 <div id="stage"></div>
 
@@ -35,12 +40,8 @@ Open the assembled <code>index.html</code> directly (<code>file://</code>); no s
 </footer>
 
 <script type="module">
-// dgs dependency bundle (backend output, inlined at build time).
-/*BUNDLE_DGS*/
-</script>
-<script type="module">
-// dgs-playground bundle (backend output, inlined at build time).
-/*BUNDLE_PLAYGROUND*/
+// Single bundle: runtime + all crates (backend output, inlined at build time).
+/*BUNDLE*/
 
 // ---- page entry: the Rust main runs when loaded ----
 // (No shims, no wiring here: imports bind true JS functions, and the Rust

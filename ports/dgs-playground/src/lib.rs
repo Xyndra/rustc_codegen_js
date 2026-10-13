@@ -28,6 +28,10 @@ extern "C" {
     fn arm_4(event: &str, cb: fn());
     #[js::import = "document.getElementById(\"s5\").addEventListener"]
     fn arm_5(event: &str, cb: fn());
+    #[js::import = "document.getElementById(\"render\").addEventListener"]
+    fn arm_cmd(event: &str, cb: fn());
+    #[js::import = "(() => document.getElementById(\"cmd\").value)"]
+    fn cmd_text() -> String;
 }
 
 #[js::export]
@@ -47,6 +51,7 @@ pub fn init() {
     unsafe { arm_3("click", show_3) };
     unsafe { arm_4("click", show_4) };
     unsafe { arm_5("click", show_5) };
+    unsafe { arm_cmd("click", run_cmd) };
     paint(0);
 }
 
@@ -73,6 +78,23 @@ fn show_4() {
 }
 fn show_5() {
     paint(5);
+}
+
+#[js::export]
+pub fn run_from_source() {
+    let code = unsafe { cmd_text() };
+    match eval::render(&code) {
+        Ok(svg) => {
+            unsafe { stage_clear() };
+            unsafe { stage_show("afterbegin", &svg) };
+            unsafe { status_show("rendered") };
+        }
+        Err(e) => unsafe { status_show(&format!("Error: {e}")) },
+    }
+}
+
+fn run_cmd() {
+    run_from_source();
 }
 
 fn scene(i: usize) -> &'static str {

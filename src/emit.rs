@@ -1961,7 +1961,22 @@ impl<'tcx> Emitter<'tcx> {
                 // indirection (`__js_imports.<fn>`) or a true JS path from
                 // `#[js::import = "<path>"]` (called as written, so methods
                 // keep their receiver).
-                Ok(format!("{name}({})", v.join(",")))
+                let call = format!("{name}({})", v.join(","));
+                // Foreign JS that returns an owned `String` hands back a raw
+                // JS string; wrap it in the same 1-cell holder Rust uses for
+                // `String` so callers unwrap via `[0]`.
+                let mut dt = self.subst(dest_ty);
+                loop {
+                    match dt.kind() {
+                        ty::Ref(_, inner, _) | ty::RawPtr(inner, _) => dt = *inner,
+                        _ => break,
+                    }
+                }
+                if matches!(repr_of(self.tcx, dt), Repr::BufStr) {
+                    Ok(format!("[{call}]"))
+                } else {
+                    Ok(call)
+                }
             }
             CallTarget::Panic(k) => self.panic_expr(*k, arg_ops, &args),
             CallTarget::Not(inner) => Ok(format!("!({})", self.call_expr(inner, arg_ops, dest_ty)?)),

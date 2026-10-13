@@ -17,6 +17,13 @@
 // bundles and their `.d.ts` files for inspection. No JavaScript is authored
 // here; the script fails loudly if a bundle is missing or a slot is absent.
 
+use oxc_allocator::Allocator;
+use oxc_codegen::{Codegen, CodegenOptions};
+use oxc_minifier::{
+    CompressOptions, MangleOptions, MangleOptionsKeepNames as MK, Minifier, MinifierOptions,
+};
+use oxc_parser::Parser;
+use oxc_span::SourceType;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -42,9 +49,46 @@ fn main() {
 
     let dgs_bundle = newest_bundle(&build_dir, DGS_PKG, "dgs.mjs");
     let pg_bundle = newest_bundle(&build_dir, PLAYGROUND_PKG, "dgs_playground.mjs");
-    let dgs_text = fs::read_to_string(&dgs_bundle).expect("read dgs.mjs");
-    let pg_text = fs::read_to_string(&pg_bundle).expect("read dgs_playground.mjs");
-    for (name, text) in [("dgs.mjs", &dgs_text), ("dgs_playground.mjs", &pg_text)] {
+    let dgs_raw = fs::read_to_string(&dgs_bundle).expect("read dgs.mjs");
+    let pg_raw = fs::read_to_string(&pg_bundle).expect("read dgs_playground.mjs");
+    let (runtime_raw, mut dgs_raw2) = split_runtime(&dgs_raw);
+    let (_, mut pg_raw2) = split_runtime(&pg_raw);
+    // drop dgs exports section (remove duplicate wrappers)
+    if let Some(idx) = dgs_raw2.rfind("// ---- exports ----") {
+        dgs_raw2 = dgs_raw2[..idx].trim_end().to_string();
+    }
+    // pg: drop global registration assignments, keep wrappers
+    pg_raw2 = regex::Regex::new(r"[^\n]*globalThis\.__js_imports[^;]*;\n?")
+        .unwrap()
+        .replace_all(&pg_raw2, "")
+        .to_string();
+    let mut combined = String::new();
+    combined.push_str(&runtime_raw);
+    combined.push('\n');
+    combined.push_str(&dgs_raw2);
+    combined.push('\n');
+    combined.push_str(&pg_raw2);
+    // one shared import table
+    combined = combined.replace("const __js_imports = globalThis.__js_imports ?? {};", "");
+    combined = format!(
+        "const __js_imports = globalThis.__js_imports ?? {{}};\n{}",
+        combined
+    );
+    // inline cross-crate calls
+    let re = regex::Regex::new(r"__js_imports\.([A-Za-z0-9_$]+)\(").unwrap();
+    combined = re.replace_all(&combined, "$1(").to_string();
+    // remove remaining global registry assignments
+    let re2 = regex::Regex::new(r"[^\n]*globalThis\.__js_imports[^;]*;\n?").unwrap();
+    combined = re2.replace_all(&combined, "").to_string();
+    // normalize exports
+    combined = combined.replace("export function ", "function ");
+    let re3 = regex::Regex::new(r"(?m)^\s*export\s*\{[^}]*\};?\s*$").unwrap();
+    combined = re3.replace_all(&combined, "").to_string();
+    combined = combined.replace("export ", "");
+    // ensure init call site at bottom
+    combined = format!("{}\n_js_init();", combined);
+    let combined = minify_js(&combined, false, true);
+    for (name, text) in [("bundle.mjs", &combined)] {
         if text.trim().is_empty() {
             panic!("dgs-site: {name} is empty");
         }
@@ -54,38 +98,38 @@ fn main() {
     }
     // The page drives the crate's main entry by its wrapper name, and the
     // crate's imports are true JS calls (no host shims for the page to give).
-    for wrapper in ["export function _js_init(", "export function _js_run("] {
-        if !pg_text.contains(wrapper) {
+    for wrapper in ["function _js_init(", "function _js_run("] {
+        if !combined.contains(wrapper) {
             panic!("dgs-site: dgs_playground.mjs has no `{wrapper}` wrapper for the page to call");
         }
     }
     for call in [
-        "getElementById(\"stage\").replaceChildren(",
-        "getElementById(\"stage\").insertAdjacentHTML(",
-        "getElementById(\"status\").replaceChildren(",
-        "getElementById(\"s0\").addEventListener(",
+        "replaceChildren(",
+        "insertAdjacentHTML(",
+        "addEventListener(",
+        "stage",
+        "status",
+        "s0",
     ] {
-        if !pg_text.contains(call) {
+        if !combined.contains(call) {
             panic!("dgs-site: dgs_playground.mjs never calls `{call}`");
         }
     }
 
     let template_path = manifest.join("../dgs-playground/index.html");
     let mut page = fs::read_to_string(&template_path).expect("read index.html template");
-    for slot in ["/*BUNDLE_DGS*/", "/*BUNDLE_PLAYGROUND*/"] {
+
+    for slot in ["/*BUNDLE*/"] {
         if !page.contains(slot) {
             panic!("dgs-site: template is missing placeholder {slot}");
         }
     }
-    page = page
-        .replacen("/*BUNDLE_DGS*/", &dgs_text, 1)
-        .replacen("/*BUNDLE_PLAYGROUND*/", &pg_text, 1);
+    page = page.replacen("/*BUNDLE*/", &combined, 1);
 
     let site = target.join(&profile).join("dgs-playground");
     fs::create_dir_all(&site).expect("create site dir");
     fs::write(site.join("index.html"), &page).expect("write index.html");
-    fs::write(site.join("dgs.mjs"), &dgs_text).expect("write dgs.mjs");
-    fs::write(site.join("dgs_playground.mjs"), &pg_text).expect("write dgs_playground.mjs");
+    fs::write(site.join("bundle.mjs"), &combined).expect("write bundle.mjs");
     for (src, dst) in [
         (dgs_bundle.with_extension("d.ts"), "dgs.d.ts"),
         (pg_bundle.with_extension("d.ts"), "dgs_playground.d.ts"),
@@ -170,4 +214,51 @@ fn workspace_target(manifest: &Path) -> PathBuf {
 
 fn env_str(k: &str) -> String {
     std::env::var(k).unwrap_or_else(|_| panic!("cargo did not set {k}"))
+}
+fn split_runtime(text: &str) -> (String, String) {
+    let marker = "// rustc_codegen_js runtime preamble (inlined into every bundle).";
+    let start = text
+        .find(marker)
+        .expect("dgs-site: no runtime marker in bundle");
+    let line_start = text[..start].rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let end_marker = "\n// ---- functions ----\n";
+    let end = text
+        .find(end_marker)
+        .expect("dgs-site: no functions marker in bundle");
+    let runtime = text[line_start..end].to_string();
+    let rest = format!("{}{}", &text[..line_start], &text[end..]);
+    (runtime, rest)
+}
+
+fn minify_js(text: &str, script: bool, top_level: bool) -> String {
+    let allocator = Allocator::default();
+    let source_type = if script {
+        SourceType::script()
+    } else {
+        SourceType::mjs()
+    };
+    let ret = Parser::new(&allocator, text, source_type).parse();
+    if !ret.diagnostics.is_empty() {
+        panic!("dgs-site: minify parse errors: {:?}", ret.diagnostics);
+    }
+    let mut program = ret.program;
+    let opts = MinifierOptions {
+        mangle: Some(MangleOptions {
+            top_level: Some(top_level),
+            keep_names: MK::all_false(),
+            reserved: ["_js_init", "_js_run", "_js_run_from_source"]
+                .into_iter()
+                .map(|s| s.into())
+                .collect(),
+            ..Default::default()
+        }),
+        mangle_properties: None,
+        compress: Some(CompressOptions::safest()),
+    };
+    let mr = Minifier::new(opts).minify(&allocator, &mut program);
+    Codegen::new()
+        .with_options(CodegenOptions::minify())
+        .with_scoping(mr.scoping)
+        .build(&program)
+        .code
 }
