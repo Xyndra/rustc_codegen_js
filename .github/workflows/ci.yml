@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Build, test, site
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache Rust toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ~/.rustup
+          key: rust-toolchain-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}
+          restore-keys: rust-toolchain-${{ runner.os }}-
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-09-15
+          components: rustc-dev rust-src
+
+      - name: Cache cargo build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            ports -> ports/target
+
+      - name: Build backend (release)
+        run: cargo build --release
+
+      - name: Run corpus differential tests
+        run: sh tests/diff.sh
+
+      - name: Make ports backend path CI-local
+        run: sed -i "s#/run/media/xyndra/Samsung/Code/Rust/rustc_codegen_js#$GITHUB_WORKSPACE#g" ports/.cargo/config.toml
+
+      - name: Build site
+        run: cargo build --manifest-path ports/Cargo.toml -p dgs-site
