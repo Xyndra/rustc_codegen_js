@@ -47,8 +47,8 @@ jobs:
       - name: Run corpus differential tests
         run: sh tests/diff.sh
 
-      - name: Make ports backend path CI-local
-        run: sed -i "s#/run/media/xyndra/Samsung/Code/Rust/rustc_codegen_js#$GITHUB_WORKSPACE#g" ports/.cargo/config.toml
+      - name: Build playground bundles
+        run: cargo build --manifest-path ports/Cargo.toml -p dgs -p dgs-playground
 
       - name: Build site
         run: cargo build --manifest-path ports/Cargo.toml -p dgs-site
