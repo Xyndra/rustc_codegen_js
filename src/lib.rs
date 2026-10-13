@@ -21,6 +21,7 @@
 //! - §4 default for 64/128-bit integers is BigInt (not split lo/hi pairs).
 
 #![feature(rustc_private)]
+#![recursion_limit = "256"]
 
 extern crate rustc_abi;
 extern crate rustc_attr_ir;
