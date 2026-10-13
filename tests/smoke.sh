@@ -32,7 +32,7 @@ RLIB_OUT=$(find "$TARGET_DIR" -name "libsmoke.rlib" | head -1)
   exit 1
 }
 grep -q "@ts-nocheck" "$JS_OUT" || { echo "SMOKE FAIL: no @ts-nocheck in $JS_OUT"; exit 1; }
-grep -q "export function add" "$JS_OUT" || { echo "SMOKE FAIL: no export in $JS_OUT"; exit 1; }
+grep -q "_js_add as add" "$JS_OUT" || grep -q "export function add" "$JS_OUT" || { echo "SMOKE FAIL: no export in $JS_OUT"; exit 1; }
 grep -q "export declare function add" "$DTS_OUT" || { echo "SMOKE FAIL: no d.ts entry in $DTS_OUT"; exit 1; }
 node --check "$JS_OUT" 2>/dev/null || echo "(node unavailable, skipped syntax check)"
 

@@ -61,8 +61,12 @@ MIR is ever emitted for these. The following adaptors are implemented:
 `zip`, `chain`, `take`, `skip`, `step_by`, `cloned`, `copied`, `count`,
 `last`, `nth`, `position`, `find`, `any`, `all`, `fold`, `for_each`, `sum`,
 `product`, `min`, `max`, `min_by`, `max_by`, `map_or`, `map_or_else`,
-`and_then`, `ok_or`, `or_else`, `unwrap_or`, `unwrap_or_else`,
-`unwrap_or_default`, `filter_map`-like `inspect`, `collect`, `eq`.
+ `and_then`, `ok_or`, `or_else`, `unwrap_or`, `unwrap_or_else`,
+ `unwrap_or_default`, `filter_map`-like `inspect`, `collect`, `eq`.
+ Conversions through `From`/`Into` are recognized by trait (not by path text,
+ which erases `<...>` groups): `String::from(&str/String)`, `Vec::from([T; N])`
+ (including the const-generic `[T; N]` impl, whose args carry `N` as a const),
+ `Vec::from(&[T])`, and reflexive `From<T> for T` (identity) are all mapped.
 
 **Not implemented (diagnosed):** `HashMap`/`HashSet` (need a real hash-table
 runtime with a `Hash` impl), `BTreeMap`/`BTreeSet` (ordered-table runtime),
@@ -94,7 +98,10 @@ memory (`copy_*`, `write_bytes`, volatile/unaligned intrinsics).
 The boundary is opt-in per item:
 
 - `#[js::export]` on a **free function** — generates an ES module `export`
-  and a corresponding TypeScript declaration. Parameter/return types must be
+  and a corresponding TypeScript declaration. Boundary functions are emitted
+  as a type-coercing wrapper (`export function _js_<name>(...)`) plus a plain
+  re-export alias (`export { _js_<name> as <name> }`), so the public name is
+  the alias, not a direct `export function <name>`. Parameter/return types must be
   in the allowed set: `f64`, `i32`, `u32`, `bool`, `String`, `&str`, and
   `()` (void). Generic boundary functions are rejected.
 - `#[js::import]` on a foreign function, or on its enclosing `extern "C"`
@@ -142,8 +149,12 @@ The boundary is opt-in per item:
 ## Number model
 
 - 64/128-bit integers use `BigInt` (not the wasm-style split lo/hi pairs).
-- Wrapping operations (`wrapping_add` etc.) and checked operations
-  (`checked_*`, `overflowing_*`, `saturating_*`) are implemented using
+- Wrapping operations (`wrapping_add`, `wrapping_sub`, `wrapping_mul`,
+  `wrapping_neg`, `wrapping_shl`, `wrapping_shr`), checked operations
+  (`checked_add`, `checked_sub`, `checked_mul`, `checked_div`, `checked_rem`,
+  `checked_neg`), saturating operations (`saturating_add`, `saturating_sub`,
+  `saturating_mul`), and overflowing operations (`overflowing_add`,
+  `overflowing_sub`, `overflowing_mul`, `overflowing_neg`) are implemented using
   `BigInt` arithmetic when the operand width exceeds 32 bits, so they match
   Rust's semantics (including wrap on overflow) through 128 bits.
 - Float-to-int casts use Rust-style saturation semantics (`NaN` → 0, infinities clamp to the range).
@@ -185,7 +196,13 @@ Packages:
 ## Open items (not yet implemented)
 
 - Multi-threading, OS services, file/network/time, custom allocators.
+- Raw-pointer arithmetic.
+- f32 bit-exactness (f32 is narrowed with `Math.fround` at casts/stores;
+  intermediate operations run in f64).
 - `dyn Trait` dynamic dispatch.
+- Cross-crate generic calls: these resolve by `DefId` (identity fallback), so
+  a generic function from another crate is emitted once per local use rather
+  than truly monomorphized per upstream instance.
 - `async`/`await` / coroutines.
 - `derive` beyond what lowers to recognized shims (no `PartialEq`/`Eq` trait
   vtable path; equality is structural via `__deep_eq`).

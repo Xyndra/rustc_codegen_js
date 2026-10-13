@@ -4,4 +4,4 @@
 cargo-features = ["profile-rustflags"]
 [workspace]
 resolver = "2"
-members = ["dom", "dgs-browser", "typst-browser", "dgs-playground", "dgs-quicktest"]
+members = ["dom", "dgs-browser", "typst-browser", "dgs-playground", "dgs-quicktest", "color-test"]

@@ -227,7 +227,7 @@ fn fn_name_crate_inner<'tcx>(
     mut active_order: Option<&mut Vec<crate::InstKeySer>>,
 ) -> (String, String) {
     let inst_crate = tcx.crate_name(inst.def_id().krate).to_string().replace('-', "_");
-    let inst_key = InstKeySer::from_instance(inst);
+    let inst_key = InstKeySer::from_instance(tcx, inst);
     if let Some(n) = crate::g_fn_names().lock().unwrap().get(&inst_key) {
         return (n.clone(), inst_crate.clone());
     }
@@ -258,7 +258,10 @@ fn fn_name_crate_inner<'tcx>(
         assign_name(tcx, crate_name.to_string(), inst)
     };
     // Register the name (closure or not) in the taken set to avoid collisions.
-    crate::g_fn_names().lock().unwrap().insert(inst_key, name.clone());
+    crate::g_fn_names().lock().unwrap().insert(inst_key.clone(), name.clone());
+    // Remember the concrete instance so the drain loop can emit a genuinely
+    // monomorphized body (the serializable key alone cannot rebuild args).
+    crate::remember_concrete_inst(&inst_key.to_str(), inst);
     // Persist the name, order, and dependency edge to the shared state file so
     // that the final drain (in the last-crate invocation) can assemble all
     // bundles from a complete, cross-invocation view.
@@ -269,14 +272,14 @@ fn fn_name_crate_inner<'tcx>(
     }
     if inst_crate == crate_name {
         if let Some(q) = active_queue {
-            if q.insert(inst_key) {
+            if q.insert(inst_key.clone()) {
                 active_order.as_mut().unwrap().push(inst_key);
             }
         }
     } else {
         // Cross-crate call target: enqueue it into the *target* crate's
         // worklist (plus an edge so the drain order knows the dependency).
-        crate::g_queued().lock().unwrap().entry(inst_crate.clone()).or_default().insert(inst_key);
+        crate::g_queued().lock().unwrap().entry(inst_crate.clone()).or_default().insert(inst_key.clone());
         crate::g_order().lock().unwrap().entry(inst_crate.clone()).or_default().push(inst_key);
         crate::g_requires().lock().unwrap().entry(crate_name.to_string().clone()).or_default().insert(inst_crate.clone());
     }
@@ -432,7 +435,7 @@ impl<'tcx> Emitter<'tcx> {
             .iter()
             .map(|d| subst_ty(tcx, args, d.ty))
             .collect();
-        let inst_key = InstKeySer::from_instance(inst);
+    let inst_key = InstKeySer::from_instance(tcx, inst);
         let name = crate::g_fn_names()
             .lock()
             .unwrap()
@@ -441,7 +444,7 @@ impl<'tcx> Emitter<'tcx> {
             .unwrap_or_default();
         let mut em = Emitter {
             tcx,
-            instance: InstKeySer::from_instance(inst),
+            instance: InstKeySer::from_instance(tcx, inst),
             args,
             body: body.clone(),
             span,
@@ -1173,6 +1176,20 @@ impl<'tcx> Emitter<'tcx> {
 
     // ---------------- binary / unary ops ----------------
 
+    /// Receiver type for a primitive operator-trait shim. References and
+    /// transparent boxes hold the same value as their pointee/inner, so peel
+    /// them before reusing `binop_expr`/`unop_expr`.
+    fn prim_self_ty(&mut self, tys: &[Ty<'tcx>]) -> Result<Ty<'tcx>, ()> {
+        let t = match tys.first().copied() {
+            Some(t) => t,
+            None => {
+                self.err("primitive operator call without operands".to_string());
+                return Err(());
+            }
+        };
+        Ok(tyutil::peel_eq_self(self.tcx, self.subst(t)))
+    }
+
     fn binop_expr(
         &mut self,
         op: mir::BinOp,
@@ -1409,15 +1426,17 @@ impl<'tcx> Emitter<'tcx> {
 
     fn with_overflow_num(&self, _wrap: &str, op: &str, l: &str, r: &str, k: NumKind) -> String {
         let (lo, hi) = self.int_bounds(k);
-        let (s, w) = match k {
-            NumKind::I8 | NumKind::I16 | NumKind::I32 | NumKind::Isize => {
-                (format!("{l}{op}{r}"), format!("({l}{op}{r})|0"))
-            }
-            _ => (
-                format!("{l}{op}{r}"),
-                format!("({l}{op}{r})>>>0"),
-            ),
+        // Width-correct wrap of the raw sum (same lattice as `wrap_num`,
+        // but applied to the `__s` temporary).
+        let w = match k {
+            NumKind::I8 => "((__s<<24)>>24)",
+            NumKind::I16 => "((__s<<16)>>16)",
+            NumKind::I32 | NumKind::Isize => "(__s|0)",
+            NumKind::U8 => "(__s&255)",
+            NumKind::U16 => "(__s&65535)",
+            NumKind::U32 | NumKind::Usize | NumKind::Char => "(__s>>>0)",
         };
+        let s = format!("{l}{op}{r}");
         format!(
             "(()=>{{const __s={s};return [{w},(__s<{lo}||__s>{hi})];}})()"
         )
@@ -1490,8 +1509,8 @@ impl<'tcx> Emitter<'tcx> {
             },
             UnOp::Neg => match repr_of(self.tcx, ty) {
                 Repr::Float => Ok(format!("(-{e})")),
-                Repr::Num(k) => Ok(self.wrap_num(format!("-{e}"), k)),
-                Repr::Big(k) => Ok(self.wrap_big(format!("-{e}"), k)),
+                Repr::Num(k) => Ok(self.wrap_num(format!("-({e})"), k)),
+                Repr::Big(k) => Ok(self.wrap_big(format!("-({e})"), k)),
                 _ => {
                     self.err(format!("negation of {ty} is not supported"));
                     Err(())
@@ -2723,6 +2742,13 @@ impl<'tcx> Emitter<'tcx> {
             }
             StringAdd => self.scell(&format!("({}[0]+{}[0])", a(0), a(1))),
             StrToOwned => self.scell(&a(0)),
+            // `&str` / `String` -> `PointRef::Named`: a PointRef cell
+            // `{t:0,v:[String-cell]}` wrapping a `&str` value inside a
+            // String cell (`[&str]` = a(0)).
+            PointRefFromStr => format!("[{{t:0,v:[[{}]]}}]", a(0)),
+            // `(f64, f64)` -> `PointRef::Coords`: a PointRef cell
+            // `{t:1,v:[f64,f64]}`.
+            PointRefFromTuple => format!("[{{t:1,v:[{},{}]}}]", a(0), a(1)),
             StrLen => format!("__str_len({})", a(0)),
             StrIsEmpty => format!("({}.length===0)", a(0)),
             StrAsBytes => {
@@ -2898,10 +2924,309 @@ impl<'tcx> Emitter<'tcx> {
             }
             PrimEq => format!("({}==={})", a(0), a(1)),
             PrimNe => format!("({}!=={})", a(0), a(1)),
+            PrimAdd => {
+                let (l, r) = (a(0), a(1));
+                let t0 = tys.first().copied().unwrap_or(dest_ty);
+                // `String + &str`: concatenate the cell contents. The rhs
+                // may be a raw `&str` (not a cell), so unwrap per-side.
+                if self.is_str_cell_ty(t0) {
+                    let lv = format!("{l}[0]");
+                    let rv = match tys.get(1).copied() {
+                        Some(t) if self.is_str_cell_ty(t) => format!("{r}[0]"),
+                        _ => r,
+                    };
+                    self.scell(&format!("({lv}+{rv})"))
+                } else {
+                    let lty = self.prim_self_ty(tys)?;
+                    self.binop_expr(mir::BinOp::Add, l, r, lty, dest_ty)?
+                }
+            }
+            PrimSub => {
+                let (l, r) = (a(0), a(1));
+                let lty = self.prim_self_ty(tys)?;
+                self.binop_expr(mir::BinOp::Sub, l, r, lty, dest_ty)?
+            }
+            PrimMul => {
+                let (l, r) = (a(0), a(1));
+                let lty = self.prim_self_ty(tys)?;
+                self.binop_expr(mir::BinOp::Mul, l, r, lty, dest_ty)?
+            }
+            PrimDiv => {
+                let (l, r) = (a(0), a(1));
+                let lty = self.prim_self_ty(tys)?;
+                self.binop_expr(mir::BinOp::Div, l, r, lty, dest_ty)?
+            }
+            PrimRem => {
+                let (l, r) = (a(0), a(1));
+                let lty = self.prim_self_ty(tys)?;
+                self.binop_expr(mir::BinOp::Rem, l, r, lty, dest_ty)?
+            }
+            PrimBitAnd => {
+                let (l, r) = (a(0), a(1));
+                let lty = self.prim_self_ty(tys)?;
+                self.binop_expr(mir::BinOp::BitAnd, l, r, lty, dest_ty)?
+            }
+            PrimBitOr => {
+                let (l, r) = (a(0), a(1));
+                let lty = self.prim_self_ty(tys)?;
+                self.binop_expr(mir::BinOp::BitOr, l, r, lty, dest_ty)?
+            }
+            PrimBitXor => {
+                let (l, r) = (a(0), a(1));
+                let lty = self.prim_self_ty(tys)?;
+                self.binop_expr(mir::BinOp::BitXor, l, r, lty, dest_ty)?
+            }
+            PrimShl => {
+                let (l, r) = (a(0), a(1));
+                let lty = self.prim_self_ty(tys)?;
+                self.binop_expr(mir::BinOp::Shl, l, r, lty, dest_ty)?
+            }
+            PrimShr => {
+                let (l, r) = (a(0), a(1));
+                let lty = self.prim_self_ty(tys)?;
+                self.binop_expr(mir::BinOp::Shr, l, r, lty, dest_ty)?
+            }
+            PrimNeg => {
+                let e = a(0);
+                let ty = self.prim_self_ty(tys)?;
+                self.unop_expr(mir::UnOp::Neg, e, ty)?
+            }
+            PrimNot => {
+                let e = a(0);
+                let ty = self.prim_self_ty(tys)?;
+                self.unop_expr(mir::UnOp::Not, e, ty)?
+            }
             IntMin => format!("(({0})<({1})?({0}):({1}))", a(0), a(1)),
             IntMax => format!("(({0})>({1})?({0}):({1}))", a(0), a(1)),
             IntClamp => format!("(({0})<({1})?({1}):(({0})>({2})?({2}):({0})))", a(0), a(1), a(2)),
             IntAbs => format!("(({0})<0?-({0}):({0}))", a(0)),
+            IntWrappingAdd => {
+                let (l, r) = (a(0), a(1));
+                self.wrap_add(&l, &r, dest_ty)?
+            }
+            IntWrappingSub => {
+                let (l, r) = (a(0), a(1));
+                self.wrap_sub(&l, &r, dest_ty)?
+            }
+            IntSaturatingAdd => {
+                let (l, r) = (a(0), a(1));
+                self.sat_add(&l, &r, dest_ty)?
+            }
+            IntSaturatingSub => {
+                let (l, r) = (a(0), a(1));
+                self.sat_sub(&l, &r, dest_ty)?
+            }
+            IntCheckedAdd => {
+                let (x, y) = (a(0), a(1));
+                let ty = self.prim_self_ty(tys)?;
+                let (ds, dn) = self.opt_discrs(dest_ty)?;
+                match repr_of(self.tcx, ty) {
+                    Repr::Num(k) => {
+                        let bits = num_bits(k);
+                        let signed = self.num_signed(k);
+                        let val = self.wrap_num("__c[0]".to_string(), k);
+                        format!("(()=>{{const __c=__checked_add_num({x},{y},{bits},{signed});return __c[1]?__none({dn}):__some({ds},{val});}})()")
+                    }
+                    Repr::Big(k) => {
+                        let bits = k.bits();
+                        let signed = k.signed();
+                        format!("(()=>{{const __c=__checked_add_big({x},{y},{bits},{signed});return __c[1]?__none({dn}):__some({ds},__c[0]);}})()")
+                    }
+                    _ => {
+                        self.err(format!("checked_add on {ty} is not supported"));
+                        return Err(());
+                    }
+                }
+            }
+            IntCheckedDiv => {
+                let (x, y) = (a(0), a(1));
+                let ty = self.prim_self_ty(tys)?;
+                let (ds, dn) = self.opt_discrs(dest_ty)?;
+                match repr_of(self.tcx, ty) {
+                    Repr::Num(k) => {
+                        let signed = self.num_signed(k);
+                        let (lo, _) = self.int_bounds(k);
+                        let overflow = if signed {
+                            format!("({x}==={lo}&&{y}===-1)")
+                        } else {
+                            "false".to_string()
+                        };
+                        let val = self.wrap_num(format!("Math.trunc({x}/{y})"), k);
+                        format!("(()=>(({y}===0||{overflow})?__none({dn}):__some({ds},{val})))()")
+                    }
+                    Repr::Big(k) => {
+                        let signed = k.signed();
+                        let lo = big_int_lo(k);
+                        let overflow = if signed {
+                            format!("({x}==={lo}&&{y}===-1n)")
+                        } else {
+                            "false".to_string()
+                        };
+                        let val = self.wrap_big(format!("({x}/{y})"), k);
+                        format!("(()=>(({y}===0n||{overflow})?__none({dn}):__some({ds},{val})))()")
+                    }
+                    _ => {
+                        self.err(format!("checked_div on {ty} is not supported"));
+                        return Err(());
+                    }
+                }
+            }
+            IntWrappingMul => {
+                let (l, r) = (a(0), a(1));
+                self.wrap_mul(&l, &r, dest_ty)?
+            }
+            IntWrappingNeg => {
+                let x = a(0);
+                self.wrap_neg(&x, dest_ty)?
+            }
+            IntWrappingShl => {
+                let (l, r) = (a(0), a(1));
+                self.wrap_shl(&l, &r, dest_ty)?
+            }
+            IntWrappingShr => {
+                let (l, r) = (a(0), a(1));
+                self.wrap_shr(&l, &r, dest_ty)?
+            }
+            IntSaturatingMul => {
+                let (l, r) = (a(0), a(1));
+                self.sat_mul(&l, &r, dest_ty)?
+            }
+            IntCheckedSub => {
+                let (x, y) = (a(0), a(1));
+                let ty = self.prim_self_ty(tys)?;
+                let (ds, dn) = self.opt_discrs(dest_ty)?;
+                match repr_of(self.tcx, ty) {
+                    Repr::Num(k) => {
+                        let bits = num_bits(k);
+                        let signed = self.num_signed(k);
+                        let val = self.wrap_num("__c[0]".to_string(), k);
+                        format!("(()=>{{const __c=__checked_sub_num({x},{y},{bits},{signed});return __c[1]?__none({dn}):__some({ds},{val});}})()")
+                    }
+                    Repr::Big(k) => {
+                        let bits = k.bits();
+                        let signed = k.signed();
+                        format!("(()=>{{const __c=__checked_sub_big({x},{y},{bits},{signed});return __c[1]?__none({dn}):__some({ds},__c[0]);}})()")
+                    }
+                    _ => {
+                        self.err(format!("checked_sub on {ty} is not supported"));
+                        return Err(());
+                    }
+                }
+            }
+            IntCheckedMul => {
+                let (x, y) = (a(0), a(1));
+                let ty = self.prim_self_ty(tys)?;
+                let (ds, dn) = self.opt_discrs(dest_ty)?;
+                match repr_of(self.tcx, ty) {
+                    Repr::Num(k) => {
+                        let bits = num_bits(k);
+                        let signed = self.num_signed(k);
+                        let val = self.wrap_num("__c[0]".to_string(), k);
+                        format!("(()=>{{const __c=__checked_mul_num({x},{y},{bits},{signed});return __c[1]?__none({dn}):__some({ds},{val});}})()")
+                    }
+                    Repr::Big(k) => {
+                        let bits = k.bits();
+                        let signed = k.signed();
+                        format!("(()=>{{const __c=__checked_mul_big({x},{y},{bits},{signed});return __c[1]?__none({dn}):__some({ds},__c[0]);}})()")
+                    }
+                    _ => {
+                        self.err(format!("checked_mul on {ty} is not supported"));
+                        return Err(());
+                    }
+                }
+            }
+            IntCheckedRem => {
+                // `checked_rem` only fails on a zero divisor (the remainder
+                // itself never overflows: `MIN % -1 == 0` fits).
+                let (x, y) = (a(0), a(1));
+                let ty = self.prim_self_ty(tys)?;
+                let (ds, dn) = self.opt_discrs(dest_ty)?;
+                match repr_of(self.tcx, ty) {
+                    Repr::Num(k) => {
+                        let val = self.wrap_num(format!("({x}%{y})"), k);
+                        format!("(()=>(({y}===0)?__none({dn}):__some({ds},{val})))()")
+                    }
+                    Repr::Big(k) => {
+                        let val = self.wrap_big(format!("({x}%{y})"), k);
+                        format!("(()=>(({y}===0n)?__none({dn}):__some({ds},{val})))()")
+                    }
+                    _ => {
+                        self.err(format!("checked_rem on {ty} is not supported"));
+                        return Err(());
+                    }
+                }
+            }
+            IntCheckedNeg => {
+                // Signed: `None` only for `MIN`; unsigned: `None` unless zero.
+                let x = a(0);
+                let ty = self.prim_self_ty(tys)?;
+                let (ds, dn) = self.opt_discrs(dest_ty)?;
+                match repr_of(self.tcx, ty) {
+                    Repr::Num(k) => {
+                        let val = self.wrap_num(format!("-({x})"), k);
+                        if self.num_signed(k) {
+                            let (lo, _) = self.int_bounds(k);
+                            format!("(()=>(({x}==={lo})?__none({dn}):__some({ds},{val})))()")
+                        } else {
+                            format!("(()=>(({x}===0)?__some({ds},{val}):__none({dn})))()")
+                        }
+                    }
+                    Repr::Big(k) => {
+                        let val = self.wrap_big(format!("-({x})"), k);
+                        if k.signed() {
+                            let lo = big_int_lo(k);
+                            format!("(()=>(({x}==={lo})?__none({dn}):__some({ds},{val})))()")
+                        } else {
+                            format!("(()=>(({x}===0n)?__some({ds},{val}):__none({dn})))()")
+                        }
+                    }
+                    _ => {
+                        self.err(format!("checked_neg on {ty} is not supported"));
+                        return Err(());
+                    }
+                }
+            }
+            IntOverflowingAdd => {
+                let (l, r) = (a(0), a(1));
+                self.ov_add(&l, &r, dest_ty)?
+            }
+            IntOverflowingSub => {
+                let (l, r) = (a(0), a(1));
+                self.ov_sub(&l, &r, dest_ty)?
+            }
+            IntOverflowingMul => {
+                let (l, r) = (a(0), a(1));
+                self.ov_mul(&l, &r, dest_ty)?
+            }
+            IntOverflowingNeg => {
+                // Signed: overflows only on `MIN`; unsigned: on any nonzero.
+                let x = a(0);
+                let ty = self.prim_self_ty(tys)?;
+                match repr_of(self.tcx, ty) {
+                    Repr::Num(k) => {
+                        let w = self.wrap_num(format!("-({x})"), k);
+                        if self.num_signed(k) {
+                            let (lo, _) = self.int_bounds(k);
+                            format!("[{w},({x}==={lo})]")
+                        } else {
+                            format!("[{w},({x}!==0)]")
+                        }
+                    }
+                    Repr::Big(k) => {
+                        let w = self.wrap_big(format!("-({x})"), k);
+                        if k.signed() {
+                            let lo = big_int_lo(k);
+                            format!("[{w},({x}==={lo})]")
+                        } else {
+                            format!("[{w},({x}!==0n)]")
+                        }
+                    }
+                    _ => {
+                        self.err(format!("overflowing_neg on {ty} is not supported"));
+                        return Err(());
+                    }
+                }
+            }
             StrReplace => {
                 let n = self.str_pattern(&a(1), tys.get(1).copied())?;
                 let r = match tys.get(2).copied() {
@@ -3341,8 +3666,10 @@ impl<'tcx> Emitter<'tcx> {
     }
     fn wrap_neg(&mut self, x: &str, d: Ty<'tcx>) -> Result<String, ()> {
         match repr_of(self.tcx, d) {
-            Repr::Num(k) => Ok(self.wrap_num(format!("-{x}"), k)),
-            Repr::Big(k) => Ok(self.wrap_big(format!("-{x}"), k)),
+            // Parenthesize: a const-folded negative receiver (`-5`) would
+            // otherwise emit the invalid prefix-decrement `--5`.
+            Repr::Num(k) => Ok(self.wrap_num(format!("-({x})"), k)),
+            Repr::Big(k) => Ok(self.wrap_big(format!("-({x})"), k)),
             _ => {
                 self.err(format!("negation of {d} is not supported"));
                 Err(())

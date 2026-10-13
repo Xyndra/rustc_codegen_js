@@ -37,6 +37,10 @@ rustflags = ["-Zalways-encode-mir=false"]
 codegen-backend = "/run/media/xyndra/Samsung/Code/Rust/rustc_codegen_js/target/release/libcodegen_js.so"
 rustflags = ["-Zalways-encode-mir=false"]
 
+[profile.dev.package.color-test]
+codegen-backend = "/run/media/xyndra/Samsung/Code/Rust/rustc_codegen_js/target/release/libcodegen_js.so"
+rustflags = ["-Zalways-encode-mir=false"]
+
 [profile.dev.package.dgs-quicktest]
 codegen-backend = "/run/media/xyndra/Samsung/Code/Rust/rustc_codegen_js/target/release/libcodegen_js.so"
 rustflags = ["-Zalways-encode-mir=false"]

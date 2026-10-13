@@ -284,13 +284,23 @@ fn all_crates() -> &'static Mutex<Vec<CrateKey>> {
 // bundles from a complete view.
 // ---------------------------------------------------------------------------
 
-/// Serializable instance key: a DefId (plus arg info; args are identity here).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+/// Serializable instance key: a DefId plus a monomorphization fingerprint.
+///
+/// The fingerprint is empty for identity-arg instances (the overwhelmingly
+/// common case, and the only one the key format historically supported), so
+/// every existing mono flow keeps byte-identical keys. Non-empty only for
+/// genuinely monomorphized generic instantiations (`area_of::<Sq>` vs
+/// `area_of::<R>`), which previously collapsed onto one key and could not
+/// compile. The fingerprint is FNV-1a over the args' `Debug` rendering:
+/// deterministic within and across processes, and free of the state file's
+/// `;`/space separators.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InstKeySer {
     krate: usize,
     idx: usize,
     local: bool,
     local_idx: Option<usize>,
+    args_fp: String,
 }
 
 
@@ -301,14 +311,22 @@ fn inst_key_to_str(k: &crate::InstKey) -> String {
 }
 
 impl InstKeySer {
-    fn to_str(&self) -> String {
-        format!("{};{};{};{}", self.krate, self.idx, self.local,
-                self.local_idx.map(|i| i.to_string()).unwrap_or_else(|| "!0".to_string()))
+    pub(crate) fn to_str(&self) -> String {
+        format!(
+            "{};{};{};{};{}",
+            self.krate,
+            self.idx,
+            self.local,
+            self.local_idx.map(|i| i.to_string()).unwrap_or_else(|| "!0".to_string()),
+            self.args_fp,
+        )
     }
 
-    fn parse(s: &str) -> Option<Self> {
+    pub(crate) fn parse(s: &str) -> Option<Self> {
         let parts: Vec<&str> = s.split(';').collect();
-        if parts.len() != 4 { return None; }
+        if parts.len() != 4 && parts.len() != 5 {
+            return None;
+        }
         Some(InstKeySer {
             krate: parts[0].parse().ok()?,
             idx: parts[1].parse().ok()?,
@@ -318,6 +336,8 @@ impl InstKeySer {
             } else {
                 None
             },
+            // Legacy 4-part keys (pre-monomorphization state files).
+            args_fp: parts.get(4).unwrap_or(&"").to_string(),
         })
     }
 
@@ -416,19 +436,19 @@ fn is_convert_trait(tcx: TyCtxt<'_>, def_id: DefId) -> bool {
 impl InstKeySer {
     /// Build a cache key from an `Instance<'tcx>`.
     ///
-    /// The cache key materializes only the DefId: generic arguments are
-    /// ignored (the existing serialization format for the cross-invocation
-    /// state file has no place for them, and `to_inst` reconstructs as
-    /// `Instance::mono` either way). This keeps the cache key
-    /// lifetime-free, so no lifetime extension via `unsafe { transmute }`
-    /// is ever needed.
-    pub fn from_instance<'tcx>(inst: &ty::Instance<'tcx>) -> Self {
+    /// The key materializes the DefId plus a fingerprint of non-identity
+    /// generic args, so distinct monomorphizations (`f::<A>` vs `f::<B>`)
+    /// get distinct keys/names/bodies. Identity-arg instances keep the
+    /// legacy empty fingerprint, so all existing mono flows (including
+    /// cross-crate naming) are unchanged.
+    pub fn from_instance<'tcx>(tcx: TyCtxt<'tcx>, inst: &ty::Instance<'tcx>) -> Self {
         let did = inst.def_id();
         InstKeySer {
             krate: did.krate.as_usize(),
             idx: did.index.as_u32() as usize,
             local: did.is_local(),
             local_idx: did.as_local().map(|l| l.index()),
+            args_fp: args_fingerprint(tcx, inst),
         }
     }
 
@@ -439,8 +459,54 @@ impl InstKeySer {
             idx: did.index.as_u32() as usize,
             local: did.is_local(),
             local_idx: did.as_local().map(|l| l.index()),
+            args_fp: String::new(),
         }
     }
+}
+
+/// Fingerprint of an instance's generic args: `""` for identity args,
+/// otherwise FNV-1a (hex) over the args' `Debug` rendering. FNV is
+/// process-independent, so keys match across invocations; the hex digest
+/// contains no state-file separators.
+fn args_fingerprint<'tcx>(tcx: TyCtxt<'tcx>, inst: &ty::Instance<'tcx>) -> String {
+    if inst.args == ty::GenericArgs::identity_for_item(tcx, inst.def_id()) {
+        return String::new();
+    }
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in format!("{:?}", inst.args).bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    format!("{h:016x}")
+}
+
+/// Concrete instances registered by `fn_name` during this invocation, keyed
+/// by key string. Lets the drain loop emit genuinely monomorphized bodies
+/// (`to_inst` can only rebuild identity args). Same lifetime discipline as
+/// `PRE_OPT_MIR_SNAP`: arena data valid for the whole compilation.
+static GLOBAL_CONCRETE: OnceLock<Mutex<HashMap<String, ty::Instance<'static>>>> =
+    OnceLock::new();
+
+fn g_concrete() -> &'static Mutex<HashMap<String, ty::Instance<'static>>> {
+    GLOBAL_CONCRETE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Remember the concrete instance behind `key_str` (called on every
+/// `fn_name` resolution; overwriting the same key is harmless).
+pub(crate) fn remember_concrete_inst<'tcx>(key_str: &str, inst: &ty::Instance<'tcx>) {
+    g_concrete().lock().unwrap().insert(
+        key_str.to_string(),
+        unsafe { std::mem::transmute::<ty::Instance<'tcx>, ty::Instance<'static>>(*inst) },
+    );
+}
+
+/// The concrete instance for `key_str`, if registered during this
+/// invocation (`None` for keys read from another process's state file —
+/// callers fall back to `to_inst`, i.e. identity args, the old behavior).
+fn concrete_inst<'tcx>(key_str: &str) -> Option<ty::Instance<'tcx>> {
+    g_concrete().lock().unwrap().get(key_str).copied().map(|inst| unsafe {
+        std::mem::transmute::<ty::Instance<'static>, ty::Instance<'tcx>>(inst)
+    })
 }
 
 /// Parsed shared state.
@@ -803,14 +869,14 @@ fn codegen_js<'tcx>(tcx: TyCtxt<'tcx>, crate_name: &str) -> Result<(), String> {
         crate::g_order().lock().unwrap()
             .entry(crate_name.into())
             .or_default()
-            .push(InstKeySer::from_instance(&inst));
+            .push(InstKeySer::from_instance(tcx, &inst));
         crate::g_queued().lock().unwrap()
             .entry(crate_name.into())
             .or_default()
-            .insert(InstKeySer::from_instance(&inst));
+            .insert(InstKeySer::from_instance(tcx, &inst));
         // Persist this export seed so the final drain (in the last crate's
         // invocation) can assemble bundles from a complete state.
-        let key_str = inst_key_to_str(&InstKeySer::from_instance(&inst));
+        let key_str = inst_key_to_str(&InstKeySer::from_instance(tcx, &inst));
         crate::persist_fn_name(&key_str, &internal);
         crate::persist_order(crate_name, &key_str);
         let (ts_inputs, ts_out) = match check_boundary_sig(tcx, did.into(), "export", &js_name) {
@@ -836,6 +902,13 @@ fn codegen_js<'tcx>(tcx: TyCtxt<'tcx>, crate_name: &str) -> Result<(), String> {
     for did in tcx.hir_crate_items(()).definitions() {
         use rustc_hir::def::DefKind;
         use rustc_hir::ItemKind;
+        // Foreign items (`extern` declarations) have no MIR body — passing
+        // one to `mir_hook` ICEs in typeck ("can't type-check body").
+        // `#[js_import]` foreign fns are handled by the imports loop below;
+        // any other foreign item is out of scope for this backend.
+        if tcx.is_foreign_item(did.to_def_id()) {
+            continue;
+        }
         // Functions explicitly marked `#[js_export]` were already seeded in
         // the export loop above; auto-seed only the remaining functions.
         if has_attr(tcx, tcx.local_def_id_to_hir_id(did), "export") {
@@ -854,19 +927,27 @@ fn codegen_js<'tcx>(tcx: TyCtxt<'tcx>, crate_name: &str) -> Result<(), String> {
             // Generic free functions with `impl Into<T>` param (dgs
             // `point`/`line`/`circle`): MIR params are concrete after
             // impl-trait lowering, so identity args suffice — `mono` would ICE
-            // on the type parameter.
+            // on the type parameter. Generics over bare type params (`T`, `F`)
+            // are NOT seeded: identity args leave unresolvable params in the
+            // body. Their concrete instantiations are queued (and emitted
+            // monomorphized) when call sites are emitted instead.
             if !tcx.generics_of(did).own_params.is_empty() {
-                let inst = ty::Instance::new_raw(
-                    did.into(),
-                    ty::GenericArgs::identity_for_item(tcx, did),
-                );
+                let identity = ty::GenericArgs::identity_for_item(tcx, did);
+                let has_bare_param = identity.iter().any(|a| match a.kind() {
+                    ty::GenericArgKind::Type(t) => matches!(t.kind(), ty::TyKind::Param(_)),
+                    _ => false,
+                });
+                if has_bare_param {
+                    continue;
+                }
+                let inst = ty::Instance::new_raw(did.into(), identity);
                 let _ = crate::emit::fn_name(tcx, crate_name, &inst);
                 crate::g_order().lock().unwrap()
                     .entry(crate_name.into()).or_default()
-                    .push(InstKeySer::from_instance(&inst));
+                    .push(InstKeySer::from_instance(tcx, &inst));
                 crate::g_queued().lock().unwrap()
                     .entry(crate_name.into()).or_default()
-                    .insert(InstKeySer::from_instance(&inst));
+                    .insert(InstKeySer::from_instance(tcx, &inst));
                 continue;
             }
             // Non-generic free function (unchanged behavior).
@@ -874,10 +955,10 @@ fn codegen_js<'tcx>(tcx: TyCtxt<'tcx>, crate_name: &str) -> Result<(), String> {
             let _ = crate::emit::fn_name(tcx, crate_name, &inst);
             crate::g_order().lock().unwrap()
                 .entry(crate_name.into()).or_default()
-                .push(InstKeySer::from_instance(&inst));
+                .push(InstKeySer::from_instance(tcx, &inst));
             crate::g_queued().lock().unwrap()
                 .entry(crate_name.into()).or_default()
-                .insert(InstKeySer::from_instance(&inst));
+                .insert(InstKeySer::from_instance(tcx, &inst));
         } else if matches!(tcx.def_kind(did), DefKind::AssocFn) {
             // Skip trait method declarations without a default body: they
             // have no MIR, and querying it ICEs ("can't type-check body").
@@ -897,10 +978,10 @@ fn codegen_js<'tcx>(tcx: TyCtxt<'tcx>, crate_name: &str) -> Result<(), String> {
             let _ = crate::emit::fn_name(tcx, crate_name, &inst);
             crate::g_order().lock().unwrap()
                 .entry(crate_name.into()).or_default()
-                .push(InstKeySer::from_instance(&inst));
+                .push(InstKeySer::from_instance(tcx, &inst));
             crate::g_queued().lock().unwrap()
                 .entry(crate_name.into()).or_default()
-                .insert(InstKeySer::from_instance(&inst));
+                .insert(InstKeySer::from_instance(tcx, &inst));
         }
     }
 
@@ -974,11 +1055,17 @@ fn drain_crate<'tcx>(tcx: TyCtxt<'tcx>, crate_key: &str) -> HashMap<String, Stri
             if emitted.contains(key_str) {
                 continue;
             }
-            let Some(inst) = InstKeySer::parse(key_str)
-                .map(|k| k.to_inst(tcx))
-            else {
-                eprintln!("codegen_js: failed to parse instance key {}", key_str);
-                continue;
+            let inst = match concrete_inst(key_str) {
+                // Genuinely monomorphized body (registered by `fn_name`
+                // during this invocation).
+                Some(inst) => inst,
+                None => match InstKeySer::parse(key_str) {
+                    Some(k) => k.to_inst(tcx),
+                    None => {
+                        eprintln!("codegen_js: failed to parse instance key {}", key_str);
+                        continue;
+                    }
+                },
             };
             if bodies.contains_key(key_str) {
                 emitted.insert(key_str.clone());
@@ -1052,7 +1139,7 @@ fn drain_crate<'tcx>(tcx: TyCtxt<'tcx>, crate_key: &str) -> HashMap<String, Stri
                     continue;
                 }
             };
-            let inst = key.to_inst(tcx);
+            let inst = concrete_inst(&key_str).unwrap_or_else(|| key.to_inst(tcx));
             let body = match body_for(tcx, inst) {
                 Ok(b) => b,
                 Err(e) => {
@@ -1160,6 +1247,7 @@ fn assemble_js<'tcx>(
                 idx: 0,
                 local: true,
                 local_idx: Some(0),
+                args_fp: String::new(),
             }
         });
         let internal = crate::g_fn_names().lock().unwrap().get(&k).cloned().unwrap_or_else(|| "fn".to_string());
@@ -1251,6 +1339,7 @@ fn assemble_dts<'tcx>(
                 idx: 0,
                 local: true,
                 local_idx: Some(0),
+                args_fp: String::new(),
             }
         });
         let inst = k.to_inst(tcx);

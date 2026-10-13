@@ -127,6 +127,10 @@ pub enum Shim {
     AsMutFn,
     BorrowFn,
     ToStringFn,
+    // dgs PointRef conversions (From<&str>|From<String> for PointRef -> Named,
+    // From<(f64,f64)> for PointRef -> Coords).
+    PointRefFromStr,
+    PointRefFromTuple,
     MustUseFn,
     RangeIncNew,
     RangeIncContains,
@@ -263,12 +267,44 @@ pub enum Shim {
     // --- primitive equality (inline `===`/`!==`, NaN-correct) ---
     PrimEq,
     PrimNe,
+    // --- primitive operator-trait calls (`<i32 as Add>::add`, `!x`, ...) ---
+    PrimAdd,
+    PrimSub,
+    PrimMul,
+    PrimDiv,
+    PrimRem,
+    PrimBitAnd,
+    PrimBitOr,
+    PrimBitXor,
+    PrimShl,
+    PrimShr,
+    PrimNeg,
+    PrimNot,
     // --- integer min/max/clamp/abs (relational ternary: valid for both
     // --- the JS-number and the BigInt representations) ---
     IntMin,
     IntMax,
     IntClamp,
     IntAbs,
+    IntWrappingAdd,
+    IntWrappingSub,
+    IntWrappingMul,
+    IntWrappingNeg,
+    IntWrappingShl,
+    IntWrappingShr,
+    IntSaturatingAdd,
+    IntSaturatingSub,
+    IntSaturatingMul,
+    IntCheckedAdd,
+    IntCheckedSub,
+    IntCheckedMul,
+    IntCheckedDiv,
+    IntCheckedRem,
+    IntCheckedNeg,
+    IntOverflowingAdd,
+    IntOverflowingSub,
+    IntOverflowingMul,
+    IntOverflowingNeg,
     // --- str -----
     StrReplace,
     StrStripPrefix,
@@ -605,28 +641,85 @@ fn conversion_of_inst<'tcx>(
     tcx: TyCtxt<'tcx>,
     inst: ty::Instance<'tcx>,
     path: &str,
+    is_js_import: &dyn Fn(&DefId) -> bool,
 ) -> Option<Result<Callee<'tcx>, String>> {
     use crate::tyutil::ends_seg as es;
-    let is_from = es(path, &["From", "from"]);
-    let is_into = es(path, &["Into", "into"]);
+    // `def_path` erases `<...>` groups, so `<String as From<&str>>::from`
+    // normalizes to `::from` and the trait is unreadable from text. Detect
+    // it from the associated item's trait instead.
+    let trait_name: Option<String> = match inst.def {
+        ty::InstanceKind::Item(did2) => tcx
+            .opt_associated_item(did2)
+            .and_then(|a| a.trait_item_def_id())
+            .map(|t| tcx.parent(t))
+            .and_then(|t| tcx.opt_item_name(t))
+            .map(|s| s.to_string()),
+        _ => None,
+    };
+    let is_from = es(path, &["From", "from"]) || trait_name.as_deref() == Some("From");
+    let is_into = es(path, &["Into", "into"]) || trait_name.as_deref() == Some("Into");
     if !(is_from || is_into) {
         return None;
     }
     // Instance args already carry fully-resolved Self + target (e.g.
     // <String as From<&str>>::from -> [String, &#x27; str]).
-    if inst.args.len() < 2 {
-        return None;
-    }
-    let (dst, src) = if is_from {
-        (
-            crate::tyutil::subst_ty(tcx, inst.args, inst.args.type_at(0)),
-            crate::tyutil::subst_ty(tcx, inst.args, inst.args.type_at(1)),
+    // Const-generic impls (e.g. `impl<T, const N: usize> From<[T; N]> for
+    // Vec<T>`, whose args are `[T, N]`) do NOT: arg #1 is a const, so
+    // `type_at(1)` would ICE. Only take the fast path when both leading
+    // args are types; otherwise read Self/Target from the impl trait ref.
+    let first_two_types = inst.args.len() >= 2
+        && matches!(
+            inst.args[0].kind(),
+            ty::GenericArgKind::Type(_)
         )
+        && matches!(
+            inst.args[1].kind(),
+            ty::GenericArgKind::Type(_)
+        );
+    let (dst, src) = if first_two_types {
+        if is_from {
+            (
+                crate::tyutil::subst_ty(tcx, inst.args, inst.args.type_at(0)),
+                crate::tyutil::subst_ty(tcx, inst.args, inst.args.type_at(1)),
+            )
+        } else {
+            (
+                crate::tyutil::subst_ty(tcx, inst.args, inst.args.type_at(1)),
+                crate::tyutil::subst_ty(tcx, inst.args, inst.args.type_at(0)),
+            )
+        }
     } else {
-        (
-            crate::tyutil::subst_ty(tcx, inst.args, inst.args.type_at(1)),
-            crate::tyutil::subst_ty(tcx, inst.args, inst.args.type_at(0)),
-        )
+        // Monomorphized impl items (e.g. `<String as From<&str>>::from`)
+        // carry only regions in `inst.args`; read Self/Target from the
+        // impl's trait ref instead.
+        let did2 = match inst.def {
+            ty::InstanceKind::Item(did2) => did2,
+            _ => return None,
+        };
+        let parent = tcx.parent(did2);
+        if !matches!(tcx.def_kind(parent), rustc_hir::def::DefKind::Impl { .. }) {
+            return None;
+        }
+        let tr = tcx
+            .normalize_erasing_regions(
+                mono_env(),
+                tcx.impl_trait_ref(parent).instantiate(tcx, inst.args),
+            );
+        let mut ts = tr.args.iter().filter_map(|a| match a.kind() {
+            ty::GenericArgKind::Type(t) => {
+                Some(crate::tyutil::subst_ty(tcx, inst.args, t))
+            }
+            _ => None,
+        });
+        let (self_ty, targ_ty) = match (ts.next(), ts.next()) {
+            (Some(a), Some(b)) => (a, b),
+            _ => return None,
+        };
+        if is_from {
+            (self_ty, targ_ty)
+        } else {
+            (targ_ty, self_ty)
+        }
     };
     // Reflexive impl (`impl From<T> for T`, `impl Into<T> for T`): identity.
     if dst == src {
@@ -656,8 +749,62 @@ fn conversion_of_inst<'tcx>(
         // `&str` / `String` / `&String` -> `String`: the 1-cell repr.
         return Some(Ok(Callee::Shim(Shim::StrToOwned)));
     }
+    // dgs PointRef conversions: `&str` / `String` -> `PointRef::Named`,
+    // `(f64, f64)` -> `PointRef::Coords`.
+    let is_pointref = match dst.kind() {
+        ty::Adt(def, ..) if is_js_import(&def.did()) => {
+            crate::tyutil::ends_seg(&crate::tyutil::def_path(tcx, def.did()), &["PointRef"])
+        }
+        _ => false,
+    };
+    if is_pointref {
+        match src.kind() {
+            ty::Str => {
+                return Some(Ok(Callee::Shim(Shim::PointRefFromStr)));
+            }
+            ty::Ref(_, t, _) if *t.kind() == ty::Str => {
+                return Some(Ok(Callee::Shim(Shim::PointRefFromStr)));
+            }
+            _ if is_string_ty(src) => {
+                return Some(Ok(Callee::Shim(Shim::PointRefFromStr)));
+            }
+            ty::Tuple(tys) if tys.len() == 2
+                && matches!(tys[0].kind(), ty::Float(ty::FloatTy::F64))
+                && matches!(tys[1].kind(), ty::Float(ty::FloatTy::F64)) =>
+            {
+                return Some(Ok(Callee::Shim(Shim::PointRefFromTuple)));
+            }
+            _ => {}
+        }
+    }
     if dst_string && matches!(src.kind(), ty::Char) {
         return Some(Ok(Callee::Shim(Shim::StringFromChar)));
+    }
+    // `<Vec<T> as From<[T; N]>>::from`: the impl-erased path is `::from`,
+    // so dispatch on Self/Target types (both JS arrays: `.slice()` copies).
+    // Covers `Vec::from(arr)`, `vec.into()` via `Into`, `From<&[T]>`/`From<&mut [T]>`
+    // (peeled to `Slice`), and `From<Vec>`-by-ref (peeled to `Vec`).
+    let is_vec_ty = |ty: rustc_middle::ty::Ty<'tcx>| match ty.kind() {
+        ty::Adt(def, _) if crate::tyutil::is_std_item(tcx, def.did()) => {
+            let p = crate::tyutil::def_path(tcx, def.did());
+            p.ends_with("vec::Vec") || p == "Vec"
+        }
+        _ => false,
+    };
+    if is_vec_ty(dst) {
+        let peeled = match src.kind() {
+            ty::Ref(_, t, _) => *t,
+            _ => src,
+        };
+        match peeled.kind() {
+            ty::Array(..) | ty::Slice(_) => {
+                return Some(Ok(Callee::Shim(Shim::VecFromArray)));
+            }
+            _ if is_vec_ty(peeled) => {
+                return Some(Ok(Callee::Shim(Shim::VecFromArray)));
+            }
+            _ => {}
+        }
     }
     // Other pairs: emit the real body (Into's forwards are trivial).
     None
@@ -1231,6 +1378,43 @@ fn ne_eq_sibling(tcx: TyCtxt<'_>, ne_did: DefId) -> Option<DefId> {
         .map(|item| item.def_id)
 }
 
+/// Map primitive operator-trait methods (`<i32 as Add>::add`, `!x`, ...) to
+/// the same inline shapes used for MIR `BinOp`/`UnOp`. Without this these
+/// resolve to core instances with no bundle to link.
+fn classify_op_trait(tcx: TyCtxt<'_>, did: DefId) -> Option<Shim> {
+    use crate::tyutil::is_std_item;
+    let assoc = tcx.opt_associated_item(did)?;
+    let trait_item = assoc.trait_item_def_id()?;
+    let trait_did = tcx.parent(trait_item);
+    if !is_std_item(tcx, trait_did) {
+        return None;
+    }
+    let trait_name = tcx.opt_item_name(trait_did)?.as_str().to_string();
+    let method = tcx.opt_item_name(did)?.as_str().to_string();
+    let shim = match (trait_name.as_str(), method.as_str()) {
+        ("Add", "add") => Shim::PrimAdd,
+        ("Sub", "sub") => Shim::PrimSub,
+        ("Mul", "mul") => Shim::PrimMul,
+        ("Div", "div") => Shim::PrimDiv,
+        ("Rem", "rem") => Shim::PrimRem,
+        ("BitAnd", "bitand") => Shim::PrimBitAnd,
+        ("BitOr", "bitor") => Shim::PrimBitOr,
+        ("BitXor", "bitxor") => Shim::PrimBitXor,
+        ("Shl", "shl") => Shim::PrimShl,
+        ("Shr", "shr") => Shim::PrimShr,
+        ("Neg", "neg") => Shim::PrimNeg,
+        ("Not", "not") => Shim::PrimNot,
+        ("AsRef", "as_ref") => Shim::AsRefFn,
+        ("AsMut", "as_mut") => Shim::AsMutFn,
+        ("Borrow", "borrow") => Shim::BorrowFn,
+        ("BorrowMut", "borrow_mut") => Shim::BorrowFn,
+        _ => return None,
+    };
+    // The concrete receiver type is not available here for monomorphized
+    // impl items; emission validates the actual operand type.
+    Some(shim)
+}
+
 /// Map an f32/f64 inherent method to the `FloatOp` it shares with the
 /// same-named intrinsic (`x.round()` ≡ `roundf64(x)`). Without this these
 /// resolve to core instances with no bundle to link. Only fires for real
@@ -1301,10 +1485,41 @@ pub fn classify_float_method(path: &str, in_std: bool) -> Option<FloatOp> {
     })
 }
 
+/// `true` when `did` is an inherent method whose impl Self type is an
+/// integer. Inherent paths normalize away the `<impl i32>` segment (e.g.
+/// `core::num::::wrapping_add`), so the receiver cannot be read from text.
+fn inherent_int_self(tcx: TyCtxt<'_>, did: DefId) -> bool {
+    use crate::tyutil::repr_of;
+    let assoc = match tcx.opt_associated_item(did) {
+        Some(assoc) => assoc,
+        None => return false,
+    };
+    if assoc.trait_item_def_id().is_some() {
+        return false;
+    }
+    let parent = tcx.parent(did);
+    if !matches!(tcx.def_kind(parent), rustc_hir::def::DefKind::Impl { .. }) {
+        return false;
+    }
+    let self_ty = tcx.normalize_erasing_regions(
+        mono_env(),
+        tcx.type_of(parent).instantiate_identity(),
+    );
+    matches!(
+        repr_of(tcx, self_ty),
+        crate::tyutil::Repr::Num(_) | crate::tyutil::Repr::Big(_)
+    )
+}
+
 /// Map integer min/max/clamp/abs methods (and `cmp::{min,max}` free fns)
 /// to relational shims. The ternary form is valid for both the JS-number
 /// (≤32-bit) and BigInt (64/128-bit) representations, unlike `Math.min`.
-pub fn classify_int_method(path: &str, in_std: bool) -> Option<Shim> {
+pub fn classify_int_method(
+    tcx: TyCtxt<'_>,
+    did: DefId,
+    path: &str,
+    in_std: bool,
+) -> Option<Shim> {
     use crate::tyutil::ends_seg as es;
     if !in_std {
         return None;
@@ -1322,12 +1537,42 @@ pub fn classify_int_method(path: &str, in_std: bool) -> Option<Shim> {
         return Some(Shim::IntClamp);
     }
     let method = path.split("::").filter(|s| !s.is_empty()).last()?;
+    if !matches!(
+        method,
+        "min"
+            | "max"
+            | "clamp"
+            | "abs"
+            | "unsigned_abs"
+            | "wrapping_add"
+            | "wrapping_sub"
+            | "wrapping_mul"
+            | "wrapping_neg"
+            | "wrapping_shl"
+            | "wrapping_shr"
+            | "saturating_add"
+            | "saturating_sub"
+            | "saturating_mul"
+            | "checked_add"
+            | "checked_sub"
+            | "checked_mul"
+            | "checked_div"
+            | "checked_rem"
+            | "checked_neg"
+            | "overflowing_add"
+            | "overflowing_sub"
+            | "overflowing_mul"
+            | "overflowing_neg"
+    ) {
+        return None;
+    }
     let int_recv = [
         "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128",
         "usize",
     ]
     .iter()
-    .any(|r| es(path, &[r, method]));
+    .any(|r| es(path, &[r, method]))
+        || inherent_int_self(tcx, did);
     if !int_recv {
         return None;
     }
@@ -1336,6 +1581,25 @@ pub fn classify_int_method(path: &str, in_std: bool) -> Option<Shim> {
         "max" => Shim::IntMax,
         "clamp" => Shim::IntClamp,
         "abs" | "unsigned_abs" => Shim::IntAbs,
+        "wrapping_add" => Shim::IntWrappingAdd,
+        "wrapping_sub" => Shim::IntWrappingSub,
+        "wrapping_mul" => Shim::IntWrappingMul,
+        "wrapping_neg" => Shim::IntWrappingNeg,
+        "wrapping_shl" => Shim::IntWrappingShl,
+        "wrapping_shr" => Shim::IntWrappingShr,
+        "saturating_add" => Shim::IntSaturatingAdd,
+        "saturating_sub" => Shim::IntSaturatingSub,
+        "saturating_mul" => Shim::IntSaturatingMul,
+        "checked_add" => Shim::IntCheckedAdd,
+        "checked_sub" => Shim::IntCheckedSub,
+        "checked_mul" => Shim::IntCheckedMul,
+        "checked_div" => Shim::IntCheckedDiv,
+        "checked_rem" => Shim::IntCheckedRem,
+        "checked_neg" => Shim::IntCheckedNeg,
+        "overflowing_add" => Shim::IntOverflowingAdd,
+        "overflowing_sub" => Shim::IntOverflowingSub,
+        "overflowing_mul" => Shim::IntOverflowingMul,
+        "overflowing_neg" => Shim::IntOverflowingNeg,
         _ => return None,
     })
 }
@@ -1547,7 +1811,7 @@ pub fn resolve_and_classify<'tcx>(
         return Ok(Callee::Intrinsic(Intrinsic::Float(op)));
     }
     // Integer min/max/clamp/abs (methods and `cmp::{min,max}` free fns).
-    if let Some(shim) = classify_int_method(&path, in_std) {
+    if let Some(shim) = classify_int_method(tcx, did, &path, in_std) {
         return Ok(Callee::Shim(shim));
     }
     // `<String as Deref>::deref` — trait method whose path loses the type
@@ -1568,7 +1832,20 @@ pub fn resolve_and_classify<'tcx>(
     }
     let env = crate::tyutil::mono_env();
     let inst = match ty::Instance::try_resolve(tcx, env, did, args) {
-        Ok(Some(inst)) => inst,
+        Ok(Some(inst)) => {
+            let concrete: Vec<ty::GenericArg<'tcx>> = inst.args.iter()
+                .map(|arg| subst_opaque_param(tcx, arg).unwrap_or(arg))
+                .collect();
+            if inst.args != tcx.mk_args(&concrete) {
+                let concrete = tcx.mk_args(&concrete);
+                match ty::Instance::try_resolve(tcx, env, did, concrete) {
+                    Ok(Some(i)) => i,
+                    _ => return Err(format!("could not monomorphize `{path}`")),
+                }
+            } else {
+                inst
+            }
+        }
         Ok(None) => {
             // `args` can contain unresolved opaque impl-trait params
             // (`impl Into<T>` -> `Alias(Opaque, Into<T>)`): the item's MIR
@@ -1594,7 +1871,7 @@ pub fn resolve_and_classify<'tcx>(
     // ([Self, Target] for `From`/`Into` impls).
     match inst.def {
         ty::InstanceKind::Item(did2) => {
-            if let Some(res) = conversion_of_inst(tcx, inst, &path) {
+            if let Some(res) = conversion_of_inst(tcx, inst, &path, is_js_import) {
                 return res;
             }
             if matches!(tcx.def_kind(did2), rustc_hir::def::DefKind::Ctor(..)) {
@@ -1609,6 +1886,9 @@ pub fn resolve_and_classify<'tcx>(
                 return Ok(Callee::Unsupported(msg));
             }
             if let Some(shim) = classify_shim(&p2, in_std2) {
+                return Ok(Callee::Shim(shim));
+            }
+            if let Some(shim) = classify_op_trait(tcx, did2) {
                 return Ok(Callee::Shim(shim));
             }
             Ok(Callee::Direct(inst))
