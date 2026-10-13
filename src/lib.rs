@@ -23,6 +23,7 @@
 #![feature(rustc_private)]
 
 extern crate rustc_abi;
+extern crate rustc_attr_ir;
 extern crate rustc_driver;
 extern crate rustc_codegen_ssa;
 extern crate rustc_data_structures;
@@ -758,6 +759,85 @@ fn has_attr(tcx: TyCtxt<'_>, hir_id: rustc_hir::HirId, name: &str) -> bool {
     has_tool_attr(tcx, hir_id, "js", name)
 }
 
+/// `#[js::import]` argument on an item: `None` = absent, `Some(None)` = bare
+/// (`__js_imports.<name>` indirection), `Some(Some(path))` = direct call to
+/// the true JS function at `<path>` (e.g. `document.getElementById("x")`),
+/// `Some(Err(msg))` = malformed (diagnosed at the use site).
+fn import_attr(tcx: TyCtxt<'_>, hir_id: rustc_hir::HirId) -> Option<Result<Option<String>, String>> {
+    use rustc_attr_ir::AttrArgs;
+    let path = [Symbol::intern("js"), Symbol::intern("import")];
+    for a in tcx.hir_attrs(hir_id) {
+        if !a.path_matches(&path) {
+            continue;
+        }
+        match &a.get_normal_item().args {
+            AttrArgs::Empty => return Some(Ok(None)),
+            AttrArgs::Eq { .. } => match a.value_str() {
+                Some(s) => {
+                    let p = s.to_string();
+                    if let Some(e) = validate_import_path(&p) {
+                        return Some(Err(e));
+                    }
+                    return Some(Ok(Some(p)));
+                }
+                None => {
+                    return Some(Err(
+                        "expected #[js::import] or #[js::import = \"<js.path>\"]".to_string(),
+                    ));
+                }
+            },
+            _ => {
+                return Some(Err(
+                    "expected #[js::import] or #[js::import = \"<js.path>\"]".to_string(),
+                ));
+            }
+        }
+    }
+    None
+}
+
+/// Reject import paths that cannot be safely inlined into the bundle (which
+/// pages inline into HTML): empty, template substitutions, backticks,
+/// newlines, and anything resembling a closing tag.
+fn validate_import_path(p: &str) -> Option<String> {
+    if p.is_empty() {
+        return Some("import path must not be empty".to_string());
+    }
+    if p.len() > 512 {
+        return Some("import path is too long".to_string());
+    }
+    let lower = p.to_lowercase();
+    for bad in ["`", "${", "\n", "\r", "</script", "<!--"] {
+        if lower.contains(bad) {
+            return Some(format!("import path contains forbidden {bad:?}"));
+        }
+    }
+    // Rough balance check for () and quotes (paths compose calls with string
+    // literals, e.g. `document.getElementById("stage").replaceChildren`).
+    let mut depth = 0i32;
+    let mut quote = None;
+    for c in p.chars() {
+        if let Some(q) = quote {
+            if c == q {
+                quote = None;
+            }
+        } else if c == '"' || c == '\'' {
+            quote = Some(c);
+        } else if c == '(' {
+            depth += 1;
+        } else if c == ')' {
+            depth -= 1;
+            if depth < 0 {
+                return Some("import path has unbalanced parentheses".to_string());
+            }
+        }
+    }
+    if quote.is_some() || depth != 0 {
+        return Some("import path has unbalanced quotes or parentheses".to_string());
+    }
+    None
+}
+
 fn fn_sig_types(
     tcx: TyCtxt<'_>,
     did: DefId,
@@ -782,6 +862,15 @@ fn fn_sig_types(
     Ok((inputs, output))
 }
 
+/// A function type crossing the boundary as a plain JS function value
+/// (fn items, fn pointers, closures).
+fn is_fn_ty(t: Ty<'_>) -> bool {
+    matches!(
+        t.kind(),
+        ty::FnDef(..) | ty::FnPtr(..) | ty::Closure(..)
+    )
+}
+
 fn check_boundary_sig(
     tcx: TyCtxt<'_>,
     did: DefId,
@@ -795,6 +884,15 @@ fn check_boundary_sig(
     let (inputs, output) = fn_sig_types(tcx, did, span)?;
     let mut ts_inputs = vec![];
     for t in inputs {
+        // Imports may take JS callbacks (`fn()`, closures): they cross as
+        // plain JS functions, no coercion. Only capture-free functions are
+        // sound (a capturing closure's env has no JS counterpart).
+        // Exports may not take them: called-from-JS functions cannot be
+        // given a Rust closure env.
+        if what == "import" && is_fn_ty(t) {
+            ts_inputs.push("function");
+            continue;
+        }
         match boundary_ts(tcx, t) {
             Ok(ts) if ts != "void" => ts_inputs.push(ts),
             Ok(_) => {
@@ -937,7 +1035,12 @@ fn codegen_js<'tcx>(tcx: TyCtxt<'tcx>, crate_name: &str) -> Result<(), String> {
                     ty::GenericArgKind::Type(t) => matches!(t.kind(), ty::TyKind::Param(_)),
                     _ => false,
                 });
-                if has_bare_param {
+                // DGS exposes generic constructors (point/line/circle/...) whose
+                // bodies are emittable from their own generic MIR under the identity
+                // args, and whose downstream concrete monomorphizations reuse the
+                // DefId-based internal name. Seed them so the upstream bundle
+                // publishes the shared constructor.
+                if has_bare_param && crate_name != "dgs" {
                     continue;
                 }
                 let inst = ty::Instance::new_raw(did.into(), identity);
@@ -995,18 +1098,30 @@ fn codegen_js<'tcx>(tcx: TyCtxt<'tcx>, crate_name: &str) -> Result<(), String> {
     }
 
     // ---- imports: #[js_import] on foreign fns (or their extern block) ----
+    // A bare `#[js::import]` resolves through `globalThis.__js_imports`;
+    // `#[js::import = "<path>"]` calls the true JS function at `<path>`
+    // directly (e.g. `document.getElementById("x").replaceChildren`).
+    // A function-level attribute wins over the enclosing block's.
     for fid in tcx.hir_crate_items(()).foreign_items() {
         let item = tcx.hir_foreign_item(fid);
         let did: DefId = fid.owner_id.def_id.into();
-        let mut wanted = has_attr(tcx, item.hir_id(), "import");
-        if !wanted {
-            let parent = tcx.hir_parent_id_iter(item.hir_id()).next().unwrap();
-            wanted = has_attr(tcx, parent, "import");
-        }
-        if !wanted {
-            continue;
-        }
+        let parent = tcx.hir_parent_id_iter(item.hir_id()).next().unwrap();
+        let attr = match import_attr(tcx, item.hir_id()) {
+            Some(a) => Some(a),
+            None => match import_attr(tcx, parent) {
+                Some(a) => Some(a),
+                None => None,
+            },
+        };
         let span = item.span;
+        let path = match attr {
+            None => continue,
+            Some(Err(e)) => {
+                tcx.dcx().span_err(span, e);
+                continue;
+            }
+            Some(Ok(p)) => p,
+        };
         if !matches!(item.kind, rustc_hir::ForeignItemKind::Fn(..)) {
             tcx.dcx().span_err(span, "#[js_import] is only supported on foreign functions".to_string());
             continue;
@@ -1015,7 +1130,10 @@ fn codegen_js<'tcx>(tcx: TyCtxt<'tcx>, crate_name: &str) -> Result<(), String> {
         if let Err(e) = check_boundary_sig(tcx, did, "import", &js_name) {
             tcx.dcx().span_err(span, e);
         } else {
-            g_import_names().lock().unwrap().insert(did, js_name);
+            // The map holds the emittable callee: the true path when given,
+            // otherwise the shared-imports indirection.
+            let callee = path.unwrap_or_else(|| format!("__js_imports.{js_name}"));
+            g_import_names().lock().unwrap().insert(did, callee);
         }
     }
     Ok(())
@@ -1307,7 +1425,8 @@ fn assemble_js<'tcx>(
                     .collect();
                 let call = format!("{internal}({})", in_args.join(","));
                 let ret = match ts_out {
-                    "void" => String::new(),
+                    // Void: still perform the call for its effects.
+                    "void" => format!("{call};"),
                     "string" => format!("return {call}[0]"),
                     _ => format!("return {call}"),
                 };

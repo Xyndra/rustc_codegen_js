@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dgs playground (rustc_codegen_js)</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 52rem; margin: 2rem auto; padding: 0 1rem; }
+  #stage { border: 1px solid #ccc; margin-top: 1rem; }
+  #stage svg { display: block; width: 100%; height: auto; }
+  #status { color: #555; min-height: 1.2em; }
+  button { margin: 0.15rem; }
+  footer { color: #555; font-size: 0.85rem; margin-top: 2rem; }
+</style>
+</head>
+<body>
+<h1>dgs playground</h1>
+<p>Pick a scene. The renderer is Rust (<code>dgs-playground</code>) compiled to
+JavaScript by rustc_codegen_js; the Rust code arms these buttons itself.</p>
+
+<div>
+<button id="s0" type="button">point</button>
+<button id="s1" type="button">circle</button>
+<button id="s2" type="button">line</button>
+<button id="s3" type="button">dark</button>
+<button id="s4" type="button">grid</button>
+<button id="s5" type="button">polygon</button>
+</div>
+<div id="status"></div>
+<div id="stage"></div>
+
+<footer>
+<p>Static shell + backend bundles, assembled under <code>target/dgs-playground/</code>.
+Open the assembled <code>index.html</code> directly (<code>file://</code>); no server needed.</p>
+</footer>
+
+<script type="module">
+// dgs dependency bundle (backend output, inlined at build time).
+/*BUNDLE_DGS*/
+</script>
+<script type="module">
+// dgs-playground bundle (backend output, inlined at build time).
+/*BUNDLE_PLAYGROUND*/
+
+// ---- page entry: the Rust main runs when loaded ----
+// (No shims, no wiring here: imports bind true JS functions, and the Rust
+// `init` arms every button above with its scene painter.)
+_js_init();
+</script>
+</body>
+</html>

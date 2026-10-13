@@ -1,0 +1,11 @@
+[package]
+name = "dgs-site"
+version = "0.0.0"
+edition = "2021"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+dgs-playground = { version = "0.1.0", path = "../dgs-playground" }
+dgs = { version = "0.1", default-features = false }

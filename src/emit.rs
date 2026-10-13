@@ -410,6 +410,9 @@ enum CallTarget<'tcx> {
         args: ty::GenericArgsRef<'tcx>,
     },
     JsImport {
+        /// Emittable callee: the shared-imports indirection
+        /// (`__js_imports.<internal>`) for cross-crate targets, or the true
+        /// JS path from `#[js::import = "<path>"]`.
         name: String,
         args: ty::GenericArgsRef<'tcx>,
     },
@@ -1749,7 +1752,11 @@ impl<'tcx> Emitter<'tcx> {
                         use std::io::Write;
                         std::io::stderr().write_all(b"classify_did -> JsImport\n").ok();
                     }
-                    Ok(CallTarget::JsImport { name, args: ty::GenericArgs::identity_for_item(self.tcx, did) })
+                    // Cross-crate: resolve through the shared-imports map
+                    // (the defining crate publishes every drained function
+                    // there under its internal name). The `JsImport` target
+                    // always carries the emittable callee.
+                    Ok(CallTarget::JsImport { name: format!("__js_imports.{name}"), args: ty::GenericArgs::identity_for_item(self.tcx, did) })
                 } else if is_closure_call {
                     Ok(CallTarget::ClosureTrait { name })
                 } else {
@@ -1950,7 +1957,11 @@ impl<'tcx> Emitter<'tcx> {
                         _ => arg.clone(),
                     });
                 }
-                Ok(format!("__js_imports.{name}({})", v.join(",")))
+                // `name` is the emittable callee: either the shared-imports
+                // indirection (`__js_imports.<fn>`) or a true JS path from
+                // `#[js::import = "<path>"]` (called as written, so methods
+                // keep their receiver).
+                Ok(format!("{name}({})", v.join(",")))
             }
             CallTarget::Panic(k) => self.panic_expr(*k, arg_ops, &args),
             CallTarget::Not(inner) => Ok(format!("!({})", self.call_expr(inner, arg_ops, dest_ty)?)),
