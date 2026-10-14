@@ -45,7 +45,7 @@ jobs:
         run: cargo install --path tools/cargo-build-js
 
       - name: Build backend and ports with codegen backend
-        run: cargo build-js --manifest-path ports/Cargo.toml -p dgs -p dgs-playground -p dgs-site
+        run: cargo build-js --manifest-path ports/Cargo.toml -p dgs-site
         env:
           RUST_LOG: info
 
