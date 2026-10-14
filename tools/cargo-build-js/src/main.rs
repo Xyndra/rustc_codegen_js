@@ -14,6 +14,7 @@ fn root() -> PathBuf {
 }
 
 fn main() {
+    let invoked_cwd = env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let mut args: Vec<String> = env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("build-js") {
         args.remove(0);
@@ -64,8 +65,29 @@ fn main() {
             .arg(format!("profile.dev.package.{pkg}.codegen-backend=\"{backend}\""));
         cmd.arg("--config")
             .arg(format!(
-                "profile.dev.package.{pkg}.rustflags=[\"-Zalways-encode-mir=false\"]"
+                "profile.dev.package.{pkg}.rustflags=[\"-Zalways-encode-mir=false\",\"-Awarnings\"]"
             ));
+    }
+    // Make relative --manifest-path values resolve against the directory the
+    // user invoked cargo from, even though the backend runs from the repo root.
+    let mut cargo_args = cargo_args;
+    let mut in_manifest = false;
+    for arg in &mut cargo_args {
+        if in_manifest {
+            in_manifest = false;
+            let path = std::path::Path::new(arg);
+            if path.is_relative() {
+                *arg = invoked_cwd.join(path).display().to_string();
+            }
+        } else if arg == "--manifest-path" {
+            in_manifest = true;
+        } else if let Some(path) = arg.strip_prefix("--manifest-path=") {
+            let path = std::path::Path::new(path);
+            if path.is_relative() {
+                let fixed = format!("--manifest-path={}", invoked_cwd.join(path).display());
+                *arg = fixed;
+            }
+        }
     }
     cmd.args(&cargo_args);
     cmd.current_dir(&root);

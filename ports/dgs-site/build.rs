@@ -32,6 +32,7 @@ const PLAYGROUND_PKG: &str = "dgs-playground";
 const DGS_PKG: &str = "dgs";
 
 fn main() {
+    extern crate dgs_playground as _;
     let manifest = PathBuf::from(env_str("CARGO_MANIFEST_DIR"));
     let profile = env_str("PROFILE");
 
