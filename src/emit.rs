@@ -12,8 +12,8 @@
 use std::collections::{HashMap, HashSet};
 
 use rustc_abi::{FieldIdx, VariantIdx};
-use rustc_index::IndexVec;
 use rustc_hir::def_id::DefId;
+use rustc_index::IndexVec;
 use rustc_middle::mir;
 use rustc_middle::ty::{self, Ty, TyCtxt};
 use rustc_span::{Span, Spanned};
@@ -23,11 +23,11 @@ use crate::constval::{self, ConstCx};
 use crate::recognize::{
     self, ArgNewKind, Callee, FloatArithOp, FloatOp, Intrinsic, PanicKind, Shim,
 };
-use crate::InstKeySer;
 use crate::tyutil::{
-    self, BigKind, NumKind, Repr, closure_upvar_ty, def_path, discriminant_value, mono_env,
-    repr_of, subst_args, subst_ty,
+    self, closure_upvar_ty, def_path, discriminant_value, mono_env, repr_of, subst_args, subst_ty,
+    BigKind, NumKind, Repr,
 };
+use crate::InstKeySer;
 
 // ---------------------------------------------------------------------------
 // Shared backend context
@@ -61,7 +61,10 @@ fn num_bits(k: NumKind) -> u32 {
 }
 
 fn num_signed(k: NumKind) -> bool {
-    matches!(k, NumKind::I8 | NumKind::I16 | NumKind::I32 | NumKind::Isize)
+    matches!(
+        k,
+        NumKind::I8 | NumKind::I16 | NumKind::I32 | NumKind::Isize
+    )
 }
 
 /// Smallest value of a 64/128-bit integer kind, as a BigInt literal.
@@ -104,7 +107,6 @@ impl<'a, 'tcx> Ctx<'a, 'tcx> {
     pub fn diag(&mut self, span: Span, msg: String) {
         self.tcx.dcx().span_err(span, msg);
     }
-
 
     pub fn static_name(&mut self, did: DefId) -> String {
         if let Some(n) = self.static_names.get(&did) {
@@ -169,12 +171,14 @@ pub fn body_for<'tcx>(
             return Ok(body);
         }
         // First computation: take the pre-optimization body and snapshot it.
-        let body: mir::Body<'tcx> =
-            tcx.mir_drops_elaborated_and_const_checked(local).steal();
-        crate::PRE_OPT_MIR_SNAP.get_or_init(|| Mutex::new(HashMap::new()))
+        let body: mir::Body<'tcx> = tcx.mir_drops_elaborated_and_const_checked(local).steal();
+        crate::PRE_OPT_MIR_SNAP
+            .get_or_init(|| Mutex::new(HashMap::new()))
             .lock()
             .unwrap()
-            .insert(local, unsafe { std::mem::transmute::<mir::Body<'tcx>, mir::Body<'static>>(body.clone()) });
+            .insert(local, unsafe {
+                std::mem::transmute::<mir::Body<'tcx>, mir::Body<'static>>(body.clone())
+            });
         Ok(body)
     } else {
         // Upstream body (rolling checksum-free path: only reached through
@@ -216,7 +220,13 @@ pub fn fn_name<'tcx>(tcx: TyCtxt<'tcx>, crate_name: &str, inst: &ty::Instance<'t
 /// Emit-time name resolution: tracks the instance in this Emitter's active
 /// queue/order so the drain loop observes emission order.
 pub fn fn_name_crate<'tcx>(em: &mut Emitter<'tcx>, inst: &ty::Instance<'tcx>) -> (String, String) {
-    fn_name_crate_inner(em.tcx, &em.crate_name, inst, Some(&mut em.active_queue), Some(&mut em.active_order))
+    fn_name_crate_inner(
+        em.tcx,
+        &em.crate_name,
+        inst,
+        Some(&mut em.active_queue),
+        Some(&mut em.active_order),
+    )
 }
 
 fn fn_name_crate_inner<'tcx>(
@@ -226,16 +236,35 @@ fn fn_name_crate_inner<'tcx>(
     active_queue: Option<&mut HashSet<crate::InstKeySer>>,
     mut active_order: Option<&mut Vec<crate::InstKeySer>>,
 ) -> (String, String) {
-    let inst_crate = tcx.crate_name(inst.def_id().krate).to_string().replace('-', "_");
+    let inst_crate = tcx
+        .crate_name(inst.def_id().krate)
+        .to_string()
+        .replace('-', "_");
     let inst_key = InstKeySer::from_instance(tcx, inst);
     if let Some(n) = crate::g_fn_names().lock().unwrap().get(&inst_key) {
         return (n.clone(), inst_crate.clone());
     }
-    let is_closure = matches!(tcx.def_kind(inst.def_id()), rustc_hir::def::DefKind::Closure);
+    let is_closure = matches!(
+        tcx.def_kind(inst.def_id()),
+        rustc_hir::def::DefKind::Closure
+    );
     if std::env::var("JS_DEBUG_FN").is_ok() {
         use std::io::Write;
-        let mut f = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/js_debug.log").unwrap();
-        f.write_all(format!("fn_name_crate: {} crate={} ctx={}\n", tcx.def_path_str(inst.def_id()), inst_crate, crate_name).as_bytes()).ok();
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open("/tmp/js_debug.log")
+            .unwrap();
+        f.write_all(
+            format!(
+                "fn_name_crate: {} crate={} ctx={}\n",
+                tcx.def_path_str(inst.def_id()),
+                inst_crate,
+                crate_name
+            )
+            .as_bytes(),
+        )
+        .ok();
     }
     let name = if is_closure {
         // Closures have no item name; synthesize a stable unique name from the
@@ -246,7 +275,12 @@ fn fn_name_crate_inner<'tcx>(
         let parent = tcx.parent(inst.def_id());
         let parent_name = if matches!(tcx.def_kind(parent), rustc_hir::def::DefKind::Closure) {
             let parent_key = crate::InstKeySer::from_def_id(parent);
-            crate::g_fn_names().lock().unwrap().get(&parent_key).cloned().unwrap_or_else(|| "fn".to_string())
+            crate::g_fn_names()
+                .lock()
+                .unwrap()
+                .get(&parent_key)
+                .cloned()
+                .unwrap_or_else(|| "fn".to_string())
         } else {
             // Path-qualified (not bare item name): same-named parents in
             // different modules must yield different closure names.
@@ -258,7 +292,10 @@ fn fn_name_crate_inner<'tcx>(
         assign_name(tcx, crate_name.to_string(), inst)
     };
     // Register the name (closure or not) in the taken set to avoid collisions.
-    crate::g_fn_names().lock().unwrap().insert(inst_key.clone(), name.clone());
+    crate::g_fn_names()
+        .lock()
+        .unwrap()
+        .insert(inst_key.clone(), name.clone());
     // Remember the concrete instance so the drain loop can emit a genuinely
     // monomorphized body (the serializable key alone cannot rebuild args).
     crate::remember_concrete_inst(&inst_key.to_str(), inst);
@@ -279,9 +316,24 @@ fn fn_name_crate_inner<'tcx>(
     } else {
         // Cross-crate call target: enqueue it into the *target* crate's
         // worklist (plus an edge so the drain order knows the dependency).
-        crate::g_queued().lock().unwrap().entry(inst_crate.clone()).or_default().insert(inst_key.clone());
-        crate::g_order().lock().unwrap().entry(inst_crate.clone()).or_default().push(inst_key);
-        crate::g_requires().lock().unwrap().entry(crate_name.to_string().clone()).or_default().insert(inst_crate.clone());
+        crate::g_queued()
+            .lock()
+            .unwrap()
+            .entry(inst_crate.clone())
+            .or_default()
+            .insert(inst_key.clone());
+        crate::g_order()
+            .lock()
+            .unwrap()
+            .entry(inst_crate.clone())
+            .or_default()
+            .push(inst_key);
+        crate::g_requires()
+            .lock()
+            .unwrap()
+            .entry(crate_name.to_string().clone())
+            .or_default()
+            .insert(inst_crate.clone());
     }
     (name, inst_crate)
 }
@@ -343,13 +395,12 @@ fn sanitize_js_name(base: &str) -> String {
         // Strict-mode-forbidden bindings.
         "eval" | "arguments" => format!("{base}_fn"),
         // Reserved words that are legal Rust identifiers.
-        "break" | "case" | "catch" | "class" | "const" | "continue" | "debugger"
-        | "default" | "delete" | "do" | "else" | "export" | "extends" | "finally"
-        | "for" | "function" | "if" | "implements" | "import" | "in" | "instanceof"
-        | "interface" | "new" | "package" | "private" | "protected" | "public"
-        | "static" | "super" | "switch" | "this" | "throw" | "try" | "typeof"
-        | "var" | "void" | "while" | "with" | "yield" | "let" | "null" | "true"
-        | "false" => format!("{base}_fn"),
+        "break" | "case" | "catch" | "class" | "const" | "continue" | "debugger" | "default"
+        | "delete" | "do" | "else" | "export" | "extends" | "finally" | "for" | "function"
+        | "if" | "implements" | "import" | "in" | "instanceof" | "interface" | "new"
+        | "package" | "private" | "protected" | "public" | "static" | "super" | "switch"
+        | "this" | "throw" | "try" | "typeof" | "var" | "void" | "while" | "with" | "yield"
+        | "let" | "null" | "true" | "false" => format!("{base}_fn"),
         _ => base.to_string(),
     }
 }
@@ -393,10 +444,15 @@ enum CallTarget<'tcx> {
         name: String,
     },
     /// Closure called with already-spread args: `name(env, args...)`.
-    ClosureDirect { name: String, env: String },
+    ClosureDirect {
+        name: String,
+        env: String,
+    },
     /// Closure called through `Fn`/`FnMut`/`FnOnce` trait method:
     /// `name(call_arg0, ...call_arg1_tuple)`.
-    ClosureTrait { name: String },
+    ClosureTrait {
+        name: String,
+    },
     CtorValue,
     Dynamic {
         expr: String,
@@ -438,7 +494,7 @@ impl<'tcx> Emitter<'tcx> {
             .iter()
             .map(|d| subst_ty(tcx, args, d.ty))
             .collect();
-    let inst_key = InstKeySer::from_instance(tcx, inst);
+        let inst_key = InstKeySer::from_instance(tcx, inst);
         let name = crate::g_fn_names()
             .lock()
             .unwrap()
@@ -478,7 +534,10 @@ impl<'tcx> Emitter<'tcx> {
             // Library crate without exports: replace the partial output with
             // a throwing stub so the bundle still builds. The warning above
             // names the gap; the stub names it again at runtime.
-            let msg = em.last_err.clone().unwrap_or_else(|| "unsupported construct".to_string());
+            let msg = em
+                .last_err
+                .clone()
+                .unwrap_or_else(|| "unsupported construct".to_string());
             let inst_path = tcx.def_path_str(inst.def_id());
             return format!(
                 "function {name}(){{\nthrow new Error({:?});\n}}\n",
@@ -490,7 +549,9 @@ impl<'tcx> Emitter<'tcx> {
         }
         if std::env::var("JS_DEBUG").is_ok() {
             use std::io::Write;
-            std::io::stderr().write_all(format!("emit_fn: END {}\n", path_of(inst)).as_bytes()).ok();
+            std::io::stderr()
+                .write_all(format!("emit_fn: END {}\n", path_of(inst)).as_bytes())
+                .ok();
         }
         std::mem::replace(&mut em.out, String::new())
     }
@@ -540,9 +601,13 @@ impl<'tcx> Emitter<'tcx> {
         // must not block the whole bundle: warn, and the caller (`emit_fn`)
         // replaces the partial output with a throwing stub.
         if crate::crate_is_strict(&self.crate_name) {
-            self.tcx.dcx().span_err(span, format!("codegen_js: {msg} (in {inst})"));
+            self.tcx
+                .dcx()
+                .span_err(span, format!("codegen_js: {msg} (in {inst})"));
         } else {
-            self.tcx.dcx().span_warn(span, format!("codegen_js: {msg} (in {inst})"));
+            self.tcx
+                .dcx()
+                .span_warn(span, format!("codegen_js: {msg} (in {inst})"));
         }
     }
 
@@ -651,7 +716,11 @@ impl<'tcx> Emitter<'tcx> {
                                 let variant = def.non_enum_variant();
                                 match variant.fields.get(FieldIdx::from_usize(i)) {
                                     Some(f) => {
-                                        let ft = tyutil::subst_unchecked(self.tcx, args, self.tcx.type_of(f.did).skip_binder());
+                                        let ft = tyutil::subst_unchecked(
+                                            self.tcx,
+                                            args,
+                                            self.tcx.type_of(f.did).skip_binder(),
+                                        );
                                         self.subst(ft)
                                     }
                                     None => {
@@ -785,26 +854,24 @@ impl<'tcx> Emitter<'tcx> {
                 }
             }
             mir::Operand::RuntimeChecks(rc) => Ok((
-                if rc.value(self.tcx.sess) { "true".to_string() } else { "false".to_string() },
+                if rc.value(self.tcx.sess) {
+                    "true".to_string()
+                } else {
+                    "false".to_string()
+                },
                 self.tcx.types.bool,
             )),
         }
     }
 
     /// A function item used as a *value*: `$name` or a ctor arrow.
-    fn fn_value_of(
-        &mut self,
-        did: DefId,
-        fargs: ty::GenericArgsRef<'tcx>,
-    ) -> Result<String, ()> {
+    fn fn_value_of(&mut self, did: DefId, fargs: ty::GenericArgsRef<'tcx>) -> Result<String, ()> {
         let enclosing_params = if self.body.arg_count > 0 {
-            let param_tys: Vec<ty::GenericArg<'tcx>> =
-                self.body
-                    .local_decls
-                    [mir::Local::from_usize(1)..mir::Local::from_usize(1 + self.body.arg_count)]
-                    .iter()
-                    .map(|ld| ty::GenericArg::from(ld.ty))
-                    .collect();
+            let param_tys: Vec<ty::GenericArg<'tcx>> = self.body.local_decls
+                [mir::Local::from_usize(1)..mir::Local::from_usize(1 + self.body.arg_count)]
+                .iter()
+                .map(|ld| ty::GenericArg::from(ld.ty))
+                .collect();
             Some(self.tcx.mk_args(&param_tys))
         } else {
             None
@@ -845,8 +912,7 @@ impl<'tcx> Emitter<'tcx> {
                 Err(())
             }
             Ok(Callee::JsImport(did)) => {
-                Ok(crate::get_import_name(&did)
-                    .unwrap_or_else(|| "undefined".to_string()))
+                Ok(crate::get_import_name(&did).unwrap_or_else(|| "undefined".to_string()))
             }
             Ok(Callee::Not(_)) => {
                 self.err("`!=` cannot be used as a function value".to_string());
@@ -864,11 +930,7 @@ impl<'tcx> Emitter<'tcx> {
     }
 
     /// `(a0, a1) => ({t: D, v: [a0, a1]})` or `(...a) => ([...a])`.
-    fn ctor_arrow(
-        &mut self,
-        did: DefId,
-        fargs: ty::GenericArgsRef<'tcx>,
-    ) -> Result<String, ()> {
+    fn ctor_arrow(&mut self, did: DefId, fargs: ty::GenericArgsRef<'tcx>) -> Result<String, ()> {
         use rustc_hir::def::{CtorOf, DefKind};
         match self.tcx.def_kind(did) {
             DefKind::Ctor(CtorOf::Variant, _) => {
@@ -899,17 +961,14 @@ impl<'tcx> Emitter<'tcx> {
                     }
                 };
                 let n = adt.variant(v).fields.len();
-                let params: Vec<String> =
-                    (0..n).map(|i| format!("c{i}")).collect();
+                let params: Vec<String> = (0..n).map(|i| format!("c{i}")).collect();
                 Ok(format!(
                     "({})=>({{t:{d},v:[{}]}})",
                     params.join(","),
                     params.join(",")
                 ))
             }
-            DefKind::Ctor(CtorOf::Struct, _) => {
-                Ok("(...c)=>([...c])".to_string())
-            }
+            DefKind::Ctor(CtorOf::Struct, _) => Ok("(...c)=>([...c])".to_string()),
             _ => {
                 self.err("not a constructor".to_string());
                 Err(())
@@ -975,11 +1034,7 @@ impl<'tcx> Emitter<'tcx> {
         }
     }
 
-    fn rvalue_expr(
-        &mut self,
-        rv: &mir::Rvalue<'tcx>,
-        dest_ty: Ty<'tcx>,
-    ) -> Result<String, ()> {
+    fn rvalue_expr(&mut self, rv: &mir::Rvalue<'tcx>, dest_ty: Ty<'tcx>) -> Result<String, ()> {
         match rv {
             mir::Rvalue::Use(op, _) => Ok(self.operand_expr(op)?.0),
             mir::Rvalue::Repeat(op, len) => {
@@ -1056,8 +1111,7 @@ impl<'tcx> Emitter<'tcx> {
                 if ro == rd
                     || matches!(
                         (ro, rd),
-                        (Repr::Array, Repr::Array)
-                            | (Repr::Transparent, Repr::Transparent)
+                        (Repr::Array, Repr::Array) | (Repr::Transparent, Repr::Transparent)
                     )
                 {
                     Ok(e)
@@ -1094,12 +1148,7 @@ impl<'tcx> Emitter<'tcx> {
         }
     }
 
-    fn int_to_int(
-        &mut self,
-        e: String,
-        oty: Ty<'tcx>,
-        ty: Ty<'tcx>,
-    ) -> Result<String, ()> {
+    fn int_to_int(&mut self, e: String, oty: Ty<'tcx>, ty: Ty<'tcx>) -> Result<String, ()> {
         // bool destination
         if matches!(repr_of(self.tcx, ty), Repr::Bool) {
             return match repr_of(self.tcx, oty) {
@@ -1153,7 +1202,9 @@ impl<'tcx> Emitter<'tcx> {
                 };
                 Ok(self.wrap_num(format!("__cast_num({e},{lo},{hi})"), k))
             }
-            Repr::Big(k) => Ok(self.wrap_big(format!("__cast_big({e},{},{})", k.bits(), k.signed()), k)),
+            Repr::Big(k) => {
+                Ok(self.wrap_big(format!("__cast_big({e},{},{})", k.bits(), k.signed()), k))
+            }
             _ => {
                 self.err(format!("float cast to {ty} is not supported"));
                 Err(())
@@ -1440,9 +1491,7 @@ impl<'tcx> Emitter<'tcx> {
             NumKind::U32 | NumKind::Usize | NumKind::Char => "(__s>>>0)",
         };
         let s = format!("{l}{op}{r}");
-        format!(
-            "(()=>{{const __s={s};return [{w},(__s<{lo}||__s>{hi})];}})()"
-        )
+        format!("(()=>{{const __s={s};return [{w},(__s<{lo}||__s>{hi})];}})()")
     }
 
     fn with_overflow_big(&self, op: &str, l: &str, r: &str, k: BigKind) -> String {
@@ -1493,12 +1542,7 @@ impl<'tcx> Emitter<'tcx> {
         Err(())
     }
 
-    fn unop_expr(
-        &mut self,
-        op: mir::UnOp,
-        e: String,
-        ty: Ty<'tcx>,
-    ) -> Result<String, ()> {
+    fn unop_expr(&mut self, op: mir::UnOp, e: String, ty: Ty<'tcx>) -> Result<String, ()> {
         use mir::UnOp;
         match op {
             UnOp::Not => match repr_of(self.tcx, ty) {
@@ -1561,9 +1605,11 @@ impl<'tcx> Emitter<'tcx> {
                 for (i, op) in ops.iter().enumerate() {
                     let (e, _) = self.operand_expr(op)?;
                     let f = &adt.variant(*variant).fields[FieldIdx::from_usize(i)];
-                    let fty = self.subst(
-                        tyutil::subst_unchecked(self.tcx, args, self.tcx.type_of(f.did).skip_binder()),
-                    );
+                    let fty = self.subst(tyutil::subst_unchecked(
+                        self.tcx,
+                        args,
+                        self.tcx.type_of(f.did).skip_binder(),
+                    ));
                     out.push(self.maybe_fround(e, fty));
                 }
                 if adt.is_enum() {
@@ -1694,13 +1740,11 @@ impl<'tcx> Emitter<'tcx> {
         // then concretizes to the projection output (`args[1]`), so
         // `try_resolve` monomorphizes the call.
         let enclosing_params = if self.body.arg_count > 0 {
-            let param_tys: Vec<ty::GenericArg<'tcx>> =
-                self.body
-                    .local_decls
-                    [mir::Local::from_usize(1)..mir::Local::from_usize(1 + self.body.arg_count)]
-                    .iter()
-                    .map(|ld| ty::GenericArg::from(ld.ty))
-                    .collect();
+            let param_tys: Vec<ty::GenericArg<'tcx>> = self.body.local_decls
+                [mir::Local::from_usize(1)..mir::Local::from_usize(1 + self.body.arg_count)]
+                .iter()
+                .map(|ld| ty::GenericArg::from(ld.ty))
+                .collect();
             Some(self.tcx.mk_args(&param_tys))
         } else {
             None
@@ -1732,17 +1776,29 @@ impl<'tcx> Emitter<'tcx> {
                 // body carries (env, args-tuple): spread the tuple.
                 let is_closure_call = match inst.def {
                     ty::InstanceKind::Item(d) => {
-                        self.tcx.def_kind(d)
-                            == rustc_hir::def::DefKind::Closure
-                            && d != did
+                        self.tcx.def_kind(d) == rustc_hir::def::DefKind::Closure && d != did
                     }
                     _ => false,
                 };
                 let (name, inst_crate) = fn_name_crate(self, &inst);
                 if std::env::var("JS_DEBUG_CALL").is_ok() {
                     use std::io::Write;
-                    let mut f = std::fs::OpenOptions::new().create(true).append(true).open("/tmp/js_debug.log").unwrap();
-                    f.write_all(format!("classify_did: {} name={} inst_crate={} ctx={}\n", self.tcx.def_path_str(inst.def_id()), name, inst_crate, self.crate_name).as_bytes()).ok();
+                    let mut f = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open("/tmp/js_debug.log")
+                        .unwrap();
+                    f.write_all(
+                        format!(
+                            "classify_did: {} name={} inst_crate={} ctx={}\n",
+                            self.tcx.def_path_str(inst.def_id()),
+                            name,
+                            inst_crate,
+                            self.crate_name
+                        )
+                        .as_bytes(),
+                    )
+                    .ok();
                     if inst_crate != self.crate_name {
                         f.write_all(b"classify_did -> JsImport\n").ok();
                     }
@@ -1750,13 +1806,18 @@ impl<'tcx> Emitter<'tcx> {
                 if inst_crate != self.crate_name {
                     if std::env::var("JS_DEBUG_CALL").is_ok() {
                         use std::io::Write;
-                        std::io::stderr().write_all(b"classify_did -> JsImport\n").ok();
+                        std::io::stderr()
+                            .write_all(b"classify_did -> JsImport\n")
+                            .ok();
                     }
                     // Cross-crate: resolve through the shared-imports map
                     // (the defining crate publishes every drained function
                     // there under its internal name). The `JsImport` target
                     // always carries the emittable callee.
-                    Ok(CallTarget::JsImport { name: format!("__js_imports.{name}"), args: ty::GenericArgs::identity_for_item(self.tcx, did) })
+                    Ok(CallTarget::JsImport {
+                        name: format!("__js_imports.{name}"),
+                        args: ty::GenericArgs::identity_for_item(self.tcx, did),
+                    })
                 } else if is_closure_call {
                     Ok(CallTarget::ClosureTrait { name })
                 } else {
@@ -1770,7 +1831,7 @@ impl<'tcx> Emitter<'tcx> {
                 // `std::iter::IntoIterator::into_iter`. Dispatch on `Self`:
                 // a Vec/array/slice needs a fresh iterator, an iterator (or
                 // a range) is passed through unchanged.
-                let op =                 if matches!(op, Shim::VecIntoIter)
+                let op = if matches!(op, Shim::VecIntoIter)
                     && tyutil::is_iterator_ty(self.tcx, self.subst(fargs.type_at(0)))
                 {
                     Shim::IntoFn
@@ -1782,12 +1843,14 @@ impl<'tcx> Emitter<'tcx> {
             Ok(Callee::Intrinsic(op)) => Ok(CallTarget::Intrinsic { op, args: fargs }),
             Ok(Callee::CtorFn) => Ok(CallTarget::CtorValue),
             Ok(Callee::JsImport(did)) => {
-                let name = crate::get_import_name(&did)
-                    .unwrap_or_else(|| "undefined".to_string());
+                let name = crate::get_import_name(&did).unwrap_or_else(|| "undefined".to_string());
                 // The resolver carries no args for #[js_import] extern items;
                 // use identity args as a fallback (js_import fns are typically
                 // non-generic).
-                Ok(CallTarget::JsImport { name, args: ty::GenericArgs::identity_for_item(self.tcx, did) })
+                Ok(CallTarget::JsImport {
+                    name,
+                    args: ty::GenericArgs::identity_for_item(self.tcx, did),
+                })
             }
             Ok(Callee::Panic(k)) => Ok(CallTarget::Panic(k)),
             Ok(Callee::FmtNew) => Ok(CallTarget::FmtNew),
@@ -1797,9 +1860,9 @@ impl<'tcx> Emitter<'tcx> {
             }
             Ok(Callee::ClosureOnce(closure, cargs)) => {
                 match ty::Instance::try_resolve(self.tcx, mono_env(), closure, cargs) {
-                    Ok(Some(inst)) => {
-                        Ok(CallTarget::ClosureTrait { name: fn_name(self.tcx, &self.crate_name, &inst) })
-                    }
+                    Ok(Some(inst)) => Ok(CallTarget::ClosureTrait {
+                        name: fn_name(self.tcx, &self.crate_name, &inst),
+                    }),
                     _ => {
                         self.err("could not resolve closure".to_string());
                         Err(())
@@ -1810,9 +1873,11 @@ impl<'tcx> Emitter<'tcx> {
                 self.err(msg.to_string());
                 Err(())
             }
-            Ok(Callee::Not(inner)) => {
-                Ok(CallTarget::Not(Box::new(self.callee_to_target(Ok(*inner), did, fargs)?)))
-            }
+            Ok(Callee::Not(inner)) => Ok(CallTarget::Not(Box::new(self.callee_to_target(
+                Ok(*inner),
+                did,
+                fargs,
+            )?))),
             Err(e) => {
                 self.err(e);
                 Err(())
@@ -1852,10 +1917,8 @@ impl<'tcx> Emitter<'tcx> {
                 // the erased RustCall signature is inspected, so build an
                 // identity-arg instance instead (mirrors fn_name_crate_inner's
                 // closure path which names closures by parent + unique index).
-                let inst = ty::Instance::new_raw(
-                    *did,
-                    ty::GenericArgs::identity_for_item(self.tcx, *did),
-                );
+                let inst =
+                    ty::Instance::new_raw(*did, ty::GenericArgs::identity_for_item(self.tcx, *did));
                 Ok(fn_name(self.tcx, &self.crate_name, &inst))
             }
             _ => {
@@ -1921,13 +1984,18 @@ impl<'tcx> Emitter<'tcx> {
                 self.err("constructor cannot be called".to_string());
                 Err(())
             }
-            CallTarget::Shim { op, args: callee_args } => {
-                self.shim_expr(*op, *callee_args, arg_ops, &args, &tys, dest_ty)
-            }
-            CallTarget::Intrinsic { op, args: callee_args } => {
-                self.intrinsic_expr(*op, *callee_args, &args, &tys, dest_ty)
-            }
-            CallTarget::JsImport { name, args: param_tys } => {
+            CallTarget::Shim {
+                op,
+                args: callee_args,
+            } => self.shim_expr(*op, *callee_args, arg_ops, &args, &tys, dest_ty),
+            CallTarget::Intrinsic {
+                op,
+                args: callee_args,
+            } => self.intrinsic_expr(*op, *callee_args, &args, &tys, dest_ty),
+            CallTarget::JsImport {
+                name,
+                args: param_tys,
+            } => {
                 let mut v: Vec<String> = Vec::with_capacity(args.len());
                 for (i, arg) in args.iter().enumerate() {
                     // Unwrap only raw boundary buffer types (&str) that arrive
@@ -1979,7 +2047,9 @@ impl<'tcx> Emitter<'tcx> {
                 }
             }
             CallTarget::Panic(k) => self.panic_expr(*k, arg_ops, &args),
-            CallTarget::Not(inner) => Ok(format!("!({})", self.call_expr(inner, arg_ops, dest_ty)?)),
+            CallTarget::Not(inner) => {
+                Ok(format!("!({})", self.call_expr(inner, arg_ops, dest_ty)?))
+            }
             CallTarget::FmtNew => {
                 self.err("fmt::Arguments::new must be peered, never called".to_string());
                 Err(())
@@ -2145,7 +2215,9 @@ impl<'tcx> Emitter<'tcx> {
                     self.err(m);
                 })?;
                 if n > 256 {
-                    self.err(format!("uninitialized array of {n} elements is not supported"));
+                    self.err(format!(
+                        "uninitialized array of {n} elements is not supported"
+                    ));
                     return Err(());
                 }
                 let e = self.uninit_shape(*elem)?;
@@ -2184,7 +2256,11 @@ impl<'tcx> Emitter<'tcx> {
                 let variant = def.non_enum_variant();
                 let mut out = Vec::with_capacity(variant.fields.len());
                 for f in variant.fields.iter() {
-                    let ft = tyutil::subst_unchecked(self.tcx, *args, self.tcx.type_of(f.did).skip_binder());
+                    let ft = tyutil::subst_unchecked(
+                        self.tcx,
+                        *args,
+                        self.tcx.type_of(f.did).skip_binder(),
+                    );
                     out.push(self.uninit_shape(self.subst(ft))?);
                 }
                 Ok(format!("[{}]", out.join(",")))
@@ -2207,7 +2283,11 @@ impl<'tcx> Emitter<'tcx> {
     ) -> Result<String, ()> {
         use Shim::*;
         // Helper to fetch positional args.
-        let a = |i: usize| args.get(i).cloned().unwrap_or_else(|| "undefined".to_string());
+        let a = |i: usize| {
+            args.get(i)
+                .cloned()
+                .unwrap_or_else(|| "undefined".to_string())
+        };
         let e = match op {
             VecNew | VecWithCapacity => "[]".to_string(),
             VecPush => format!("{}.push({})", a(0), a(1)),
@@ -3338,7 +3418,11 @@ impl<'tcx> Emitter<'tcx> {
                 for (v, _) in def.discriminants(self.tcx) {
                     if def.variant(v).name.as_str() == "Err" {
                         let f = &def.variant(v).fields[FieldIdx::from_usize(0)];
-                        found = Some(self.subst(tyutil::subst_unchecked(self.tcx, args, self.tcx.type_of(f.did).skip_binder())));
+                        found = Some(self.subst(tyutil::subst_unchecked(
+                            self.tcx,
+                            args,
+                            self.tcx.type_of(f.did).skip_binder(),
+                        )));
                         break;
                     }
                 }
@@ -3414,7 +3498,11 @@ impl<'tcx> Emitter<'tcx> {
                     return Err(());
                 }
                 let f = &variant.fields[FieldIdx::from_usize(0)];
-                let kind_ty = self.subst(tyutil::subst_unchecked(self.tcx, args, self.tcx.type_of(f.did).skip_binder()));
+                let kind_ty = self.subst(tyutil::subst_unchecked(
+                    self.tcx,
+                    args,
+                    self.tcx.type_of(f.did).skip_binder(),
+                ));
                 // Pick a plausible kind discriminant by name.
                 let is_float = matches!(tyutil::repr_of(self.tcx, target), Repr::Float);
                 let want = if is_float { "Invalid" } else { "InvalidDigit" };
@@ -3467,9 +3555,7 @@ impl<'tcx> Emitter<'tcx> {
                 )
             }
             PanicKind::AssertFailed => "__panic(\"assertion failed\")".to_string(),
-            PanicKind::Misaligned => {
-                "__panic(\"misaligned pointer dereference\")".to_string()
-            }
+            PanicKind::Misaligned => "__panic(\"misaligned pointer dereference\")".to_string(),
             PanicKind::Generic => "__panic(\"explicit panic\")".to_string(),
         };
         Ok(e)
@@ -3490,7 +3576,11 @@ impl<'tcx> Emitter<'tcx> {
         dest_ty: Ty<'tcx>,
     ) -> Result<String, ()> {
         use Intrinsic::*;
-        let a = |i: usize| args.get(i).cloned().unwrap_or_else(|| "undefined".to_string());
+        let a = |i: usize| {
+            args.get(i)
+                .cloned()
+                .unwrap_or_else(|| "undefined".to_string())
+        };
         let t0 = callee_args
             .iter()
             .find_map(|arg| match arg.kind() {
@@ -3837,7 +3927,9 @@ impl<'tcx> Emitter<'tcx> {
                 } else {
                     ("0n".to_string(), format!("((1n<<{b}n)-1n)"))
                 };
-                Ok(format!("(()=>{{const __s=({l}{op}{r});return __s<{lo}?{lo}:(__s>{hi}?{hi}:__s);}})()"))
+                Ok(format!(
+                    "(()=>{{const __s=({l}{op}{r});return __s<{lo}?{lo}:(__s>{hi}?{hi}:__s);}})()"
+                ))
             }
             _ => {
                 self.err(format!("saturating arithmetic on {d} is not supported"));
@@ -3939,12 +4031,7 @@ impl<'tcx> Emitter<'tcx> {
         }
     }
 
-    fn float_expr(
-        &mut self,
-        f: FloatOp,
-        args: &[String],
-        dest_ty: Ty<'tcx>,
-    ) -> Result<String, ()> {
+    fn float_expr(&mut self, f: FloatOp, args: &[String], dest_ty: Ty<'tcx>) -> Result<String, ()> {
         use FloatOp::*;
         let a = |i: usize| args.get(i).cloned().unwrap_or_else(|| "0".to_string());
         let e = match f {
@@ -4026,9 +4113,10 @@ impl<'tcx> Emitter<'tcx> {
     fn check_significant_drop(&mut self, ty: Ty<'tcx>) -> Result<(), ()> {
         if ty.has_significant_drop(self.tcx, mono_env()) {
             let (path, in_std) = match ty.kind() {
-                ty::Adt(def, _) => {
-                    (def_path(self.tcx, def.did()), tyutil::is_std_item(self.tcx, def.did()))
-                }
+                ty::Adt(def, _) => (
+                    def_path(self.tcx, def.did()),
+                    tyutil::is_std_item(self.tcx, def.did()),
+                ),
                 _ => (format!("{ty}"), false),
             };
             if recognize::noop_drop(&path, in_std) {
@@ -4066,9 +4154,10 @@ impl<'tcx> Emitter<'tcx> {
             return Ok(None);
         }
         let (path, in_std) = match ty.kind() {
-            ty::Adt(def, _) => {
-                (def_path(self.tcx, def.did()), tyutil::is_std_item(self.tcx, def.did()))
-            }
+            ty::Adt(def, _) => (
+                def_path(self.tcx, def.did()),
+                tyutil::is_std_item(self.tcx, def.did()),
+            ),
             _ => (format!("{ty}"), false),
         };
         if recognize::noop_drop(&path, in_std) {
@@ -4147,7 +4236,13 @@ impl<'tcx> Emitter<'tcx> {
         let body = self.body.clone();
         for bb in body.basic_blocks.iter_enumerated() {
             if let Some(term) = &bb.1.terminator {
-                if let mir::TerminatorKind::Call { func, args, destination, .. } = &term.kind {
+                if let mir::TerminatorKind::Call {
+                    func,
+                    args,
+                    destination,
+                    ..
+                } = &term.kind
+                {
                     if destination.local == local && destination.projection.is_empty() {
                         let a = args.iter().map(|s| s.node.clone()).collect();
                         return Ok(Some((func.clone(), a)));
@@ -4220,12 +4315,19 @@ impl<'tcx> Emitter<'tcx> {
                 return Ok(PeerFmt::Bytes(
                     format!(
                         "[{}]",
-                        bytes.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(",")
+                        bytes
+                            .iter()
+                            .map(|b| b.to_string())
+                            .collect::<Vec<_>>()
+                            .join(",")
                     ),
                     fargs,
                 ));
             }
-            CallTarget::Shim { op: Shim::FmtFromStr, .. } => {
+            CallTarget::Shim {
+                op: Shim::FmtFromStr,
+                ..
+            } => {
                 let t = match call_args.first() {
                     Some(o) => o.clone(),
                     None => {
@@ -4255,7 +4357,11 @@ impl<'tcx> Emitter<'tcx> {
                 Ok(PeerFmt::Bytes(
                     format!(
                         "[{}]",
-                        bytes.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(",")
+                        bytes
+                            .iter()
+                            .map(|b| b.to_string())
+                            .collect::<Vec<_>>()
+                            .join(",")
                     ),
                     fargs,
                 ))
@@ -4271,7 +4377,9 @@ impl<'tcx> Emitter<'tcx> {
     fn is_arguments_new(&mut self, func: &mir::Operand<'tcx>) -> bool {
         match func {
             mir::Operand::Constant(c) => match self.subst(c.const_.ty()).kind() {
-                ty::FnDef(did, _) => crate::tyutil::ends_seg(&def_path(self.tcx, *did), &["Arguments", "new"]),
+                ty::FnDef(did, _) => {
+                    crate::tyutil::ends_seg(&def_path(self.tcx, *did), &["Arguments", "new"])
+                }
                 _ => false,
             },
             _ => false,
@@ -4437,9 +4545,7 @@ impl<'tcx> Emitter<'tcx> {
             }
             Repr::Transparent => match ty.kind() {
                 ty::Ref(_, inner, _) => self.is_custom_display(*inner),
-                ty::Adt(def, args) if def.is_box() => {
-                    self.is_custom_display(args.type_at(0))
-                }
+                ty::Adt(def, args) if def.is_box() => self.is_custom_display(args.type_at(0)),
                 _ => true,
             },
             _ => true,
@@ -4483,7 +4589,10 @@ impl<'tcx> Emitter<'tcx> {
                     ty::Adt(_, args) => args.type_at(0),
                     _ => unreachable!(),
                 };
-                Ok(format!("{{k:'a',e:{}}}", self.fmt_desc_inner(inner, seen, depth + 1)?))
+                Ok(format!(
+                    "{{k:'a',e:{}}}",
+                    self.fmt_desc_inner(inner, seen, depth + 1)?
+                ))
             }
             Repr::Tuple => {
                 let tys: Vec<Ty<'tcx>> = match ty.kind() {
@@ -4491,13 +4600,23 @@ impl<'tcx> Emitter<'tcx> {
                     ty::Adt(def, args) => {
                         // Tuple struct: check names are positional.
                         let v = def.non_enum_variant();
-                        v.fields.iter().map(|f| {
-                            self.subst(tyutil::subst_unchecked(self.tcx, args, self.tcx.type_of(f.did).skip_binder()))
-                        }).collect()
+                        v.fields
+                            .iter()
+                            .map(|f| {
+                                self.subst(tyutil::subst_unchecked(
+                                    self.tcx,
+                                    args,
+                                    self.tcx.type_of(f.did).skip_binder(),
+                                ))
+                            })
+                            .collect()
                     }
-                    ty::Closure(_, cargs) => {
-                        cargs.as_closure().upvar_tys().iter().map(|t| self.subst(t)).collect()
-                    }
+                    ty::Closure(_, cargs) => cargs
+                        .as_closure()
+                        .upvar_tys()
+                        .iter()
+                        .map(|t| self.subst(t))
+                        .collect(),
                     _ => {
                         self.err(format!("bad tuple descriptor for {ty}"));
                         return Err(());
@@ -4577,13 +4696,19 @@ impl<'tcx> Emitter<'tcx> {
                         if ptr_like {
                             args.types().next().unwrap_or_else(|| {
                                 crate::tyutil::adt_field_ty(
-                                    self.tcx, ty, rustc_abi::VariantIdx::from_usize(0), 0,
+                                    self.tcx,
+                                    ty,
+                                    rustc_abi::VariantIdx::from_usize(0),
+                                    0,
                                 )
                                 .unwrap_or(ty)
                             })
                         } else {
                             crate::tyutil::adt_field_ty(
-                                self.tcx, ty, rustc_abi::VariantIdx::from_usize(0), 0,
+                                self.tcx,
+                                ty,
+                                rustc_abi::VariantIdx::from_usize(0),
+                                0,
                             )
                             .unwrap_or(ty)
                         }
@@ -4607,8 +4732,7 @@ impl<'tcx> Emitter<'tcx> {
     fn strip_deref(&mut self, op: mir::Operand<'tcx>) -> Result<mir::Operand<'tcx>, ()> {
         match op {
             mir::Operand::Copy(p) | mir::Operand::Move(p) => {
-                if p.projection.len() == 1
-                    && matches!(p.projection[0], mir::ProjectionElem::Deref)
+                if p.projection.len() == 1 && matches!(p.projection[0], mir::ProjectionElem::Deref)
                 {
                     let base_ty = match self.local_tys.get(p.local.index()) {
                         Some(t) => *t,
@@ -4655,7 +4779,9 @@ impl<'tcx> Emitter<'tcx> {
                         }
                     }
                 } else {
-                    self.err(format!("format template must be a plain local, found {p:?}"));
+                    self.err(format!(
+                        "format template must be a plain local, found {p:?}"
+                    ));
                     Err(())
                 }
             }
@@ -4776,7 +4902,11 @@ impl<'tcx> Emitter<'tcx> {
             }
             mir::Const::Unevaluated(uc, _) => {
                 let args = tyutil::subst_unchecked(self.tcx, self.args, uc.args);
-                let uc = mir::UnevaluatedConst { def: uc.def, args, promoted: uc.promoted };
+                let uc = mir::UnevaluatedConst {
+                    def: uc.def,
+                    args,
+                    promoted: uc.promoted,
+                };
                 match self.tcx.const_eval_resolve(mono_env(), uc, self.cur_span) {
                     Ok(ConstValue::Slice { alloc_id, meta }) => self.read_alloc(alloc_id, 0, meta),
                     Ok(ConstValue::Indirect { alloc_id, offset }) => {
@@ -4857,7 +4987,10 @@ impl<'tcx> Emitter<'tcx> {
                 Some(t) => t,
                 None => continue,
             };
-            if let mir::TerminatorKind::Call { func, destination, .. } = &term.kind {
+            if let mir::TerminatorKind::Call {
+                func, destination, ..
+            } = &term.kind
+            {
                 if !destination.projection.is_empty() {
                     continue;
                 }
@@ -4931,7 +5064,10 @@ impl<'tcx> Emitter<'tcx> {
                 rexpr = self.maybe_fround(rexpr, lty);
                 self.out.push_str(&format!("{lexpr}={rexpr};\n"));
             }
-            mir::StatementKind::SetDiscriminant { place, variant_index } => {
+            mir::StatementKind::SetDiscriminant {
+                place,
+                variant_index,
+            } => {
                 let (e, ty) = match self.place_expr(**place) {
                     Ok(v) => v,
                     Err(_) => return,
@@ -4969,7 +5105,8 @@ impl<'tcx> Emitter<'tcx> {
         self.cur_span = term.source_info.span;
         match &term.kind {
             mir::TerminatorKind::Goto { target } => {
-                self.out.push_str(&format!("bb={};continue;\n", target.index()));
+                self.out
+                    .push_str(&format!("bb={};continue;\n", target.index()));
             }
             mir::TerminatorKind::SwitchInt { discr, targets } => {
                 let (e, ty) = match self.operand_expr(discr) {
@@ -4987,9 +5124,13 @@ impl<'tcx> Emitter<'tcx> {
                     } else {
                         v.to_string()
                     };
-                    self.out.push_str(&format!("case {lit}:bb={};continue;\n", t.index()));
+                    self.out
+                        .push_str(&format!("case {lit}:bb={};continue;\n", t.index()));
                 }
-                self.out.push_str(&format!("default:bb={};continue;\n}}\n", targets.otherwise().index()));
+                self.out.push_str(&format!(
+                    "default:bb={};continue;\n}}\n",
+                    targets.otherwise().index()
+                ));
             }
             mir::TerminatorKind::Return => {
                 self.out.push_str("return M[0];\n");
@@ -5005,16 +5146,33 @@ impl<'tcx> Emitter<'tcx> {
                 match code {
                     Some(c) => {
                         self.out.push_str(&c);
-                        self.out.push_str(&format!("bb={};continue;\n", target.index()));
+                        self.out
+                            .push_str(&format!("bb={};continue;\n", target.index()));
                     }
-                    None => self.out.push_str(&format!("bb={};continue;\n", target.index())),
+                    None => self
+                        .out
+                        .push_str(&format!("bb={};continue;\n", target.index())),
                 }
             }
-            mir::TerminatorKind::Call { func, args, destination, target, .. } => {
+            mir::TerminatorKind::Call {
+                func,
+                args,
+                destination,
+                target,
+                ..
+            } => {
                 if std::env::var("JS_DEBUG").is_ok() {
                     use std::io::Write;
-                    std::io::stderr().write_all(
-                        format!("emit_term: CALL {} => {}\n", self.tcx.def_path_str(self.instance.def_id()), self.tcx.def_path_str(self.instance.def_id())).as_bytes()).ok();
+                    std::io::stderr()
+                        .write_all(
+                            format!(
+                                "emit_term: CALL {} => {}\n",
+                                self.tcx.def_path_str(self.instance.def_id()),
+                                self.tcx.def_path_str(self.instance.def_id())
+                            )
+                            .as_bytes(),
+                        )
+                        .ok();
                 }
                 if destination.projection.is_empty() && self.skipped.contains(&destination.local) {
                     // Peer-only constructor (Arguments::new, Argument::new_*):
@@ -5047,7 +5205,8 @@ impl<'tcx> Emitter<'tcx> {
                         self.out.push_str(&format!("bb={};continue;\n", bb.index()));
                     }
                     None => {
-                        self.out.push_str(&format!("{call};\nthrow __unreachable();\n"));
+                        self.out
+                            .push_str(&format!("{call};\nthrow __unreachable();\n"));
                     }
                 }
             }
@@ -5063,13 +5222,20 @@ impl<'tcx> Emitter<'tcx> {
                 };
                 self.out.push_str(&format!("return {call};\n"));
             }
-            mir::TerminatorKind::Assert { cond, expected, msg, target, .. } => {
+            mir::TerminatorKind::Assert {
+                cond,
+                expected,
+                msg,
+                target,
+                ..
+            } => {
                 let check = match self.assert_check(cond, *expected, msg) {
                     Ok(c) => c,
                     Err(_) => return,
                 };
                 self.out.push_str(&check);
-                self.out.push_str(&format!("bb={};continue;\n", target.index()));
+                self.out
+                    .push_str(&format!("bb={};continue;\n", target.index()));
             }
             mir::TerminatorKind::UnwindResume => {
                 self.out.push_str("throw __unreachable();\n");
@@ -5079,7 +5245,8 @@ impl<'tcx> Emitter<'tcx> {
             }
             mir::TerminatorKind::FalseEdge { real_target, .. }
             | mir::TerminatorKind::FalseUnwind { real_target, .. } => {
-                self.out.push_str(&format!("bb={};continue;\n", real_target.index()));
+                self.out
+                    .push_str(&format!("bb={};continue;\n", real_target.index()));
             }
             mir::TerminatorKind::Yield { .. } | mir::TerminatorKind::CoroutineDrop => {
                 self.err("async coroutines are not supported".to_string());
@@ -5093,9 +5260,17 @@ impl<'tcx> Emitter<'tcx> {
     fn assert_msg(&mut self, msg: &mir::AssertMessage<'tcx>) -> String {
         match msg {
             mir::AssertKind::BoundsCheck { len, index } => {
-                let l = self.operand_expr(len).map(|v| v.0).unwrap_or_else(|_| "?".to_string());
-                let i = self.operand_expr(index).map(|v| v.0).unwrap_or_else(|_| "?".to_string());
-                format!("__panic(\"index out of bounds: the len is \"+{l}+\" but the index is \"+{i})")
+                let l = self
+                    .operand_expr(len)
+                    .map(|v| v.0)
+                    .unwrap_or_else(|_| "?".to_string());
+                let i = self
+                    .operand_expr(index)
+                    .map(|v| v.0)
+                    .unwrap_or_else(|_| "?".to_string());
+                format!(
+                    "__panic(\"index out of bounds: the len is \"+{l}+\" but the index is \"+{i})"
+                )
             }
             mir::AssertKind::Overflow(op, _, _) => {
                 let name = match op {
@@ -5117,15 +5292,13 @@ impl<'tcx> Emitter<'tcx> {
                 "__panic(\"attempt to divide by zero\")".to_string()
             }
             mir::AssertKind::RemainderByZero(_) => {
-                "__panic(\"attempt to calculate the remainder with a divisor of zero\")"
-                    .to_string()
+                "__panic(\"attempt to calculate the remainder with a divisor of zero\")".to_string()
             }
             mir::AssertKind::MisalignedPointerDereference { .. } => {
                 // Vacuous: there are no addresses in the object model.
                 return String::new();
             }
-            mir::AssertKind::NullPointerDereference
-            | mir::AssertKind::NullReferenceConstructed => {
+            mir::AssertKind::NullPointerDereference | mir::AssertKind::NullReferenceConstructed => {
                 return String::new();
             }
             _ => "__panic(\"assertion failed\")".to_string(),
@@ -5176,12 +5349,15 @@ impl<'tcx> Emitter<'tcx> {
             | mir::TerminatorKind::SwitchInt { .. }
             | mir::TerminatorKind::FalseEdge { .. }
             | mir::TerminatorKind::FalseUnwind { .. } => Ok(()),
-            mir::TerminatorKind::Call { func, args, destination, .. } => {
+            mir::TerminatorKind::Call {
+                func,
+                args,
+                destination,
+                ..
+            } => {
                 // Peer-only constructor (Arguments::new, Argument::new_*):
                 // consumed via peering, never materialized.
-                if destination.projection.is_empty()
-                    && self.skipped.contains(&destination.local)
-                {
+                if destination.projection.is_empty() && self.skipped.contains(&destination.local) {
                     return Ok(());
                 }
                 let tgt = self.resolve_target(func)?;
@@ -5204,7 +5380,12 @@ impl<'tcx> Emitter<'tcx> {
                 }
                 Ok(())
             }
-            mir::TerminatorKind::Assert { cond, expected, msg, .. } => {
+            mir::TerminatorKind::Assert {
+                cond,
+                expected,
+                msg,
+                ..
+            } => {
                 let check = self.assert_check(cond, *expected, msg)?;
                 self.out.push_str(&check);
                 Ok(())
@@ -5228,8 +5409,7 @@ impl<'tcx> Emitter<'tcx> {
     /// The `SwitchInt` discriminator operand of a block (cloned, so it does
     /// not borrow the body while the emitter runs).
     fn switch_discr(&mut self, bb: usize) -> Result<mir::Operand<'tcx>, ()> {
-        let Some(term) = &self.body.basic_blocks[mir::BasicBlock::from_usize(bb)].terminator
-        else {
+        let Some(term) = &self.body.basic_blocks[mir::BasicBlock::from_usize(bb)].terminator else {
             return Err(());
         };
         let mir::TerminatorKind::SwitchInt { discr, .. } = &term.kind else {
@@ -5277,13 +5457,16 @@ impl<'tcx> Emitter<'tcx> {
                     };
                     self.emit_term_effect(term)?;
                 }
-                Node::Branch { bb, arms, otherwise } => {
+                Node::Branch {
+                    bb,
+                    arms,
+                    otherwise,
+                } => {
                     // The header block's statements compute the discriminant
                     // (e.g. `x > y` for `if`): they run once on entry, like
                     // a Block, and must not be dropped.
                     {
-                        let data =
-                            self.body.basic_blocks[mir::BasicBlock::from_usize(*bb)].clone();
+                        let data = self.body.basic_blocks[mir::BasicBlock::from_usize(*bb)].clone();
                         for stmt in &data.statements {
                             self.emit_stmt(stmt);
                             if self.poisoned {
@@ -5340,8 +5523,7 @@ impl<'tcx> Emitter<'tcx> {
                     // breaks out when its exit arm is selected.
                     let label = format!("L{}", self.loop_seq);
                     self.loop_seq += 1;
-                    let data =
-                        self.body.basic_blocks[mir::BasicBlock::from_usize(*bb)].clone();
+                    let data = self.body.basic_blocks[mir::BasicBlock::from_usize(*bb)].clone();
                     // Single-successor headers (`loop`, or a call/drop
                     // header whose decision branch sits deeper in the body)
                     // have no test; a `SwitchInt` header breaks out on its
@@ -5357,7 +5539,11 @@ impl<'tcx> Emitter<'tcx> {
                                 | mir::TerminatorKind::FalseUnwind { .. }
                         )
                     );
-                    let test = if single_succ { None } else { Some(self.loop_test(*bb)?) };
+                    let test = if single_succ {
+                        None
+                    } else {
+                        Some(self.loop_test(*bb)?)
+                    };
                     labels.push(label.clone());
                     self.out.push_str(&format!("{label}: while (true){{\n"));
                     for stmt in &data.statements {
@@ -5385,8 +5571,10 @@ impl<'tcx> Emitter<'tcx> {
                     let Some(label) = labels.get(labels.len() - *depth).cloned() else {
                         return Err(());
                     };
-                    self.out
-                        .push_str(&format!("{} {label};\n", if *is_break { "break" } else { "continue" }));
+                    self.out.push_str(&format!(
+                        "{} {label};\n",
+                        if *is_break { "break" } else { "continue" }
+                    ));
                 }
                 Node::Stop => {}
             }
@@ -5406,7 +5594,10 @@ impl<'tcx> Emitter<'tcx> {
                 mir::TerminatorKind::Goto { .. } => None,
                 mir::TerminatorKind::SwitchInt { discr, targets } => Some((
                     discr.clone(),
-                    targets.iter().map(|(v, t)| (v, t.index())).collect::<Vec<_>>(),
+                    targets
+                        .iter()
+                        .map(|(v, t)| (v, t.index()))
+                        .collect::<Vec<_>>(),
                 )),
                 _ => return Err(()),
             }
@@ -5439,36 +5630,51 @@ impl<'tcx> Emitter<'tcx> {
 
     /// Try to emit `body` with structured control flow. On failure nothing of
     /// the attempt is kept, so the caller can fall back to the state machine.
-fn emit_structured(&mut self, body: &mir::Body<'tcx>) -> bool {
+    fn emit_structured(&mut self, body: &mir::Body<'tcx>) -> bool {
         let path = self.tcx.def_path_str(self.instance.def_id());
         if std::env::var("JS_DEBUG").is_ok() {
             use std::io::Write;
-            std::io::stderr().write_all(format!("emit_structured: START {}\n", path).as_bytes()).ok();
+            std::io::stderr()
+                .write_all(format!("emit_structured: START {}\n", path).as_bytes())
+                .ok();
         }
         let t_an = std::time::Instant::now();
         let timing = std::env::var("JS_TIMING").is_ok();
         let Some(st) = crate::structure::Structure::analyze(body) else {
             if timing {
-                eprintln!("[js-timing] structured {path} analyze FAILED elapsed={:.3}ms", t_an.elapsed().as_secs_f64() * 1000.0);
+                eprintln!(
+                    "[js-timing] structured {path} analyze FAILED elapsed={:.3}ms",
+                    t_an.elapsed().as_secs_f64() * 1000.0
+                );
             }
             if std::env::var("JS_DEBUG").is_ok() {
                 use std::io::Write;
-                std::io::stderr().write_all(format!("emit_structured: analyze none {}\n", path).as_bytes()).ok();
+                std::io::stderr()
+                    .write_all(format!("emit_structured: analyze none {}\n", path).as_bytes())
+                    .ok();
             }
             return false;
         };
         if timing {
-            eprintln!("[js-timing] structured {path} analyze OK elapsed={:.3}ms", t_an.elapsed().as_secs_f64() * 1000.0);
+            eprintln!(
+                "[js-timing] structured {path} analyze OK elapsed={:.3}ms",
+                t_an.elapsed().as_secs_f64() * 1000.0
+            );
         }
         let budget = 4 * st.block_count() + 64;
         let t_pl = std::time::Instant::now();
         let Some(nodes) = crate::structure::plan(body, &st, budget) else {
             if timing {
-                eprintln!("[js-timing] structured {path} plan FAILED elapsed={:.3}ms", t_pl.elapsed().as_secs_f64() * 1000.0);
+                eprintln!(
+                    "[js-timing] structured {path} plan FAILED elapsed={:.3}ms",
+                    t_pl.elapsed().as_secs_f64() * 1000.0
+                );
             }
             if std::env::var("JS_DEBUG").is_ok() {
                 use std::io::Write;
-                std::io::stderr().write_all(format!("emit_structured: plan none {}\n", path).as_bytes()).ok();
+                std::io::stderr()
+                    .write_all(format!("emit_structured: plan none {}\n", path).as_bytes())
+                    .ok();
             }
             return false;
         };
@@ -5478,17 +5684,25 @@ fn emit_structured(&mut self, body: &mir::Body<'tcx>) -> bool {
         self.structure = Some(st);
         self.quiet = true;
         if timing {
-            eprintln!("[js-timing] structured {path} plan OK elapsed={:.3}ms", t_pl.elapsed().as_secs_f64() * 1000.0);
+            eprintln!(
+                "[js-timing] structured {path} plan OK elapsed={:.3}ms",
+                t_pl.elapsed().as_secs_f64() * 1000.0
+            );
         }
         let mut labels = Vec::new();
         let t_re = std::time::Instant::now();
         let ok = self.render_plan(&nodes, &mut labels).is_ok() && !self.poisoned;
         if timing {
-            eprintln!("[js-timing] structured {path} render ok={ok} elapsed={:.3}ms", t_re.elapsed().as_secs_f64() * 1000.0);
+            eprintln!(
+                "[js-timing] structured {path} render ok={ok} elapsed={:.3}ms",
+                t_re.elapsed().as_secs_f64() * 1000.0
+            );
         }
         if std::env::var("JS_DEBUG").is_ok() {
             use std::io::Write;
-            std::io::stderr().write_all(format!("emit_structured: RENDER {} => {}\n", path, ok).as_bytes()).ok();
+            std::io::stderr()
+                .write_all(format!("emit_structured: RENDER {} => {}\n", path, ok).as_bytes())
+                .ok();
         }
         self.quiet = false;
         self.structure = None;
@@ -5531,23 +5745,29 @@ fn emit_structured(&mut self, body: &mir::Body<'tcx>) -> bool {
             params.push(format!("p{i}", i = i + 1));
             frame.push(format!("p{}", i + 1));
         }
-        self.out.push_str(&format!("function {name}({}){{\n", params.join(",")));
+        self.out
+            .push_str(&format!("function {name}({}){{\n", params.join(",")));
         // One object per frame: `M[0]` is the return place, `M[1..]` the
         // arguments; every other slot is `undefined` until written (exactly
         // the semantics of the old per-local `let` declarations).
-        self.out.push_str(&format!("const M=[{}];\n", frame.join(",")));
+        self.out
+            .push_str(&format!("const M=[{}];\n", frame.join(",")));
         if std::env::var("JS_STRUCT_DEBUG").is_ok() {
             eprintln!("STRUCT-BODY {name}");
         }
         if std::env::var("JS_DEBUG").is_ok() {
             use std::io::Write;
-            std::io::stderr().write_all(format!("emit_body: START {}\n", name).as_bytes()).ok();
+            std::io::stderr()
+                .write_all(format!("emit_body: START {}\n", name).as_bytes())
+                .ok();
         }
         if self.emit_structured(body) {
             self.out.push_str("}\n");
             if std::env::var("JS_DEBUG").is_ok() {
                 use std::io::Write;
-                std::io::stderr().write_all(format!("emit_body: structured OK {}\n", name).as_bytes()).ok();
+                std::io::stderr()
+                    .write_all(format!("emit_body: structured OK {}\n", name).as_bytes())
+                    .ok();
             }
             return;
         }
@@ -5635,7 +5855,12 @@ impl<'tcx> Emitter<'tcx> {
     }
 
     /// Slice/Vec indexing: usize → bounds-checked element; ranges → sub-slice.
-    fn slice_index(&mut self, base: &str, idx: &str, idx_ty: Option<Ty<'tcx>>) -> Result<String, ()> {
+    fn slice_index(
+        &mut self,
+        base: &str,
+        idx: &str,
+        idx_ty: Option<Ty<'tcx>>,
+    ) -> Result<String, ()> {
         let idx_ty = idx_ty.map(|t| self.subst(t));
         if matches!(idx_ty.map(|t| repr_of(self.tcx, t)), Some(Repr::Num(_))) {
             return Ok(format!("{base}[__idx({base},{idx})]"));
@@ -5650,7 +5875,12 @@ impl<'tcx> Emitter<'tcx> {
     }
 
     /// `&s[range]` with native-like panics.
-    fn str_index(&mut self, base: String, idx: String, idx_ty: Option<Ty<'tcx>>) -> Result<String, ()> {
+    fn str_index(
+        &mut self,
+        base: String,
+        idx: String,
+        idx_ty: Option<Ty<'tcx>>,
+    ) -> Result<String, ()> {
         let idx_ty = idx_ty.map(|t| self.subst(t));
         if matches!(idx_ty.map(|t| repr_of(self.tcx, t)), Some(Repr::Num(_))) {
             self.err("cannot index str by integer".to_string());
@@ -5680,9 +5910,7 @@ impl<'tcx> Emitter<'tcx> {
             RangeKind::Range => Ok((format!("{idx}[0]"), format!("{idx}[1]"))),
             RangeKind::RangeFrom => Ok((format!("{idx}[0]"), "9007199254740991".to_string())),
             RangeKind::RangeTo => Ok(("0".to_string(), format!("{idx}[0]"))),
-            RangeKind::RangeFull => {
-                Ok(("0".to_string(), "9007199254740991".to_string()))
-            }
+            RangeKind::RangeFull => Ok(("0".to_string(), "9007199254740991".to_string())),
             RangeKind::RangeInclusive => Ok((format!("{idx}[0]"), format!("{idx}[1]+1"))),
         }
     }
@@ -5736,7 +5964,10 @@ impl<'tcx> Emitter<'tcx> {
         if let Some((last, prefix)) = dst_place.projection.split_last() {
             if let mir::ProjectionElem::Index(idx) = *last {
                 let idx_ty = self.local_tys.get(idx.index()).copied();
-                let base = mir::Place { local: dst_place.local, projection: self.tcx.mk_place_elems(prefix) };
+                let base = mir::Place {
+                    local: dst_place.local,
+                    projection: self.tcx.mk_place_elems(prefix),
+                };
                 let (bexpr, _) = self.place_expr(base)?;
                 let idxe = self.local(idx);
                 match self.range_kind(Some(idx_ty.unwrap_or(self.tcx.types.usize))) {

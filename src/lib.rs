@@ -25,9 +25,9 @@
 
 extern crate rustc_abi;
 extern crate rustc_attr_ir;
-extern crate rustc_driver;
 extern crate rustc_codegen_ssa;
 extern crate rustc_data_structures;
+extern crate rustc_driver;
 extern crate rustc_hir;
 extern crate rustc_index;
 extern crate rustc_metadata;
@@ -56,17 +56,17 @@ use rustc_codegen_ssa::{CompiledModules, CrateInfo, TargetConfig};
 use rustc_data_structures::steal::Steal;
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::{DefId, LocalDefId};
+use rustc_index::Idx;
 use rustc_middle::dep_graph::WorkProductMap;
 use rustc_middle::mir;
 use rustc_middle::mir::Body;
 use rustc_middle::ty::{self, Ty, TyCtxt};
 use rustc_session::config::{OutFileName, OutputFilenames, OutputType};
 use rustc_session::{IncrCompSession, Session};
-use rustc_index::Idx;
 use rustc_span::{Span, Symbol};
 use rustc_structures::CrateType;
 
-use emit::{Ctx, ExportInfo, Emitter, body_for};
+use emit::{body_for, Ctx, Emitter, ExportInfo};
 
 const RUNTIME_JS: &str = include_str!("runtime.js");
 
@@ -105,8 +105,10 @@ impl CodegenBackend for JsCodegenBackend {
     }
 
     fn codegen_crate<'tcx>(&self, tcx: TyCtxt<'tcx>) -> Box<dyn Any> {
-        let crate_name =
-            tcx.crate_name(rustc_span::def_id::LOCAL_CRATE).to_string().replace('-', "_");
+        let crate_name = tcx
+            .crate_name(rustc_span::def_id::LOCAL_CRATE)
+            .to_string()
+            .replace('-', "_");
 
         // Read shared state from earlier invocations so the final drain has a
         // complete view of all exports and reachable instances.
@@ -115,12 +117,36 @@ impl CodegenBackend for JsCodegenBackend {
         all_crates().lock().unwrap().push(crate_name.clone());
         persist_crates();
 
-        g_bodies().lock().unwrap().entry(crate_name.clone()).or_default();
-        g_order().lock().unwrap().entry(crate_name.clone()).or_default();
-        g_queued().lock().unwrap().entry(crate_name.clone()).or_default();
-        g_exports().lock().unwrap().entry(crate_name.clone()).or_default();
-        g_name_taken().lock().unwrap().entry(crate_name.clone()).or_default();
-        g_requires().lock().unwrap().entry(crate_name.clone()).or_default();
+        g_bodies()
+            .lock()
+            .unwrap()
+            .entry(crate_name.clone())
+            .or_default();
+        g_order()
+            .lock()
+            .unwrap()
+            .entry(crate_name.clone())
+            .or_default();
+        g_queued()
+            .lock()
+            .unwrap()
+            .entry(crate_name.clone())
+            .or_default();
+        g_exports()
+            .lock()
+            .unwrap()
+            .entry(crate_name.clone())
+            .or_default();
+        g_name_taken()
+            .lock()
+            .unwrap()
+            .entry(crate_name.clone())
+            .or_default();
+        g_requires()
+            .lock()
+            .unwrap()
+            .entry(crate_name.clone())
+            .or_default();
 
         if let Err(e) = codegen_js(tcx, &crate_name) {
             tcx.dcx().fatal(e.to_string());
@@ -147,13 +173,15 @@ impl CodegenBackend for JsCodegenBackend {
         _crate_info: &CrateInfo,
     ) -> (CompiledModules, WorkProductMap) {
         let _ = sess;
-        let crate_name = ongoing_codegen.downcast_ref::<String>()
+        let crate_name = ongoing_codegen
+            .downcast_ref::<String>()
             .expect("JsCodegenBackend returned the crate name")
             .clone();
         let out_dir = match outputs.path(OutputType::Metadata) {
-            OutFileName::Real(p) => {
-                p.parent().map(|d| d.to_path_buf()).unwrap_or_else(|| PathBuf::from("."))
-            }
+            OutFileName::Real(p) => p
+                .parent()
+                .map(|d| d.to_path_buf())
+                .unwrap_or_else(|| PathBuf::from(".")),
             OutFileName::Stdout => PathBuf::from("."),
         };
         let _ = fs::create_dir_all(&out_dir);
@@ -162,9 +190,15 @@ impl CodegenBackend for JsCodegenBackend {
             .unwrap()
             .entry(crate_name.clone())
             .or_insert(out_dir.clone());
-        b_outdirs().lock().unwrap().push((crate_name.clone(), out_dir));
+        b_outdirs()
+            .lock()
+            .unwrap()
+            .push((crate_name.clone(), out_dir));
         (
-            CompiledModules { modules: vec![], allocator_module: None },
+            CompiledModules {
+                modules: vec![],
+                allocator_module: None,
+            },
             WorkProductMap::default(),
         )
     }
@@ -216,11 +250,13 @@ type CrateKey = String;
 static GLOBAL_FN_NAMES: OnceLock<Mutex<HashMap<InstKey, String>>> = OnceLock::new();
 /// Names taken within each crate: key -> set of used names (renumbered on collision).
 static GLOBAL_NAME_TAKEN: OnceLock<Mutex<HashMap<CrateKey, HashSet<String>>>> = OnceLock::new();
-static GLOBAL_BODIES: OnceLock<Mutex<HashMap<CrateKey, HashMap<InstKey, String>>>> = OnceLock::new();
+static GLOBAL_BODIES: OnceLock<Mutex<HashMap<CrateKey, HashMap<InstKey, String>>>> =
+    OnceLock::new();
 static GLOBAL_ORDER: OnceLock<Mutex<HashMap<CrateKey, Vec<InstKey>>>> = OnceLock::new();
 static GLOBAL_QUEUED: OnceLock<Mutex<HashMap<CrateKey, HashSet<InstKey>>>> = OnceLock::new();
 static GLOBAL_EXPORTS: OnceLock<Mutex<HashMap<CrateKey, Vec<ExportInfo>>>> = OnceLock::new();
-static GLOBAL_IMPORT_NAMES: OnceLock<Mutex<HashMap<rustc_hir::def_id::DefId, String>>> = OnceLock::new();
+static GLOBAL_IMPORT_NAMES: OnceLock<Mutex<HashMap<rustc_hir::def_id::DefId, String>>> =
+    OnceLock::new();
 static GLOBAL_OUTDIRS: OnceLock<Mutex<HashMap<CrateKey, PathBuf>>> = OnceLock::new();
 static BUNDLE_OUTDIRS: OnceLock<Mutex<Vec<(CrateKey, PathBuf)>>> = OnceLock::new();
 /// Dependency edges recorded by `fn_name`: `A requires B` means crate `A` has a
@@ -305,8 +341,6 @@ pub struct InstKeySer {
     args_fp: String,
 }
 
-
-
 /// Convert a global InstKey into its serialized form.
 fn inst_key_to_str(k: &crate::InstKey) -> String {
     k.to_str()
@@ -319,7 +353,9 @@ impl InstKeySer {
             self.krate,
             self.idx,
             self.local,
-            self.local_idx.map(|i| i.to_string()).unwrap_or_else(|| "!0".to_string()),
+            self.local_idx
+                .map(|i| i.to_string())
+                .unwrap_or_else(|| "!0".to_string()),
             self.args_fp,
         )
     }
@@ -359,7 +395,9 @@ impl InstKeySer {
         } else {
             rustc_hir::def_id::DefId { krate, index: idx }
         };
-        let args = self.concretize_args(tcx).unwrap_or_else(|| ty::GenericArgs::identity_for_item(tcx, did));
+        let args = self
+            .concretize_args(tcx)
+            .unwrap_or_else(|| ty::GenericArgs::identity_for_item(tcx, did));
         ty::Instance::new_raw(did, &args)
     }
 
@@ -399,12 +437,15 @@ impl InstKeySer {
             rustc_hir::def_id::DefId { krate, index: idx }
         };
         // Sanity-check the reconstructed local index against the key.
-        if self.local && self.local_idx.is_some()
+        if self.local
+            && self.local_idx.is_some()
             && Some(self.local_idx.unwrap()) != did.as_local().map(|l| l.index())
         {
             eprintln!(
                 "codegen_js: local_idx mismatch for {} (key={:?}) -> {:#?}",
-                self.to_str(), self.local_idx, did
+                self.to_str(),
+                self.local_idx,
+                did
             );
         }
         did
@@ -419,7 +460,17 @@ impl InstKeySer {
 
 /// Concretize an opaque impl-trait parameter to its projection output type.
 fn subst_opaque<'a>(tcx: TyCtxt<'a>, ty: ty::Ty<'a>) -> Option<ty::GenericArg<'a>> {
-    let ty::TyKind::Alias(_, ty::AliasTy { kind: ty::AliasTyKind::Opaque { def_id }, args, .. }) = *ty.kind() else { return None };
+    let ty::TyKind::Alias(
+        _,
+        ty::AliasTy {
+            kind: ty::AliasTyKind::Opaque { def_id },
+            args,
+            ..
+        },
+    ) = *ty.kind()
+    else {
+        return None;
+    };
     // `impl Into<T>` / `impl From<S>`: the opaque alias carries the trait's
     // args [Self (hidden impl), T]; for Into/From the projection's output
     // type is exactly T, the second alias arg.
@@ -433,7 +484,6 @@ fn is_convert_trait(tcx: TyCtxt<'_>, def_id: DefId) -> bool {
     let p = crate::tyutil::def_path(tcx, def_id);
     p.ends_with("convert::Into") || p.ends_with("convert::From") || p == "Into" || p == "From"
 }
-
 
 impl InstKeySer {
     /// Build a cache key from an `Instance<'tcx>`.
@@ -486,8 +536,7 @@ fn args_fingerprint<'tcx>(tcx: TyCtxt<'tcx>, inst: &ty::Instance<'tcx>) -> Strin
 /// by key string. Lets the drain loop emit genuinely monomorphized bodies
 /// (`to_inst` can only rebuild identity args). Same lifetime discipline as
 /// `PRE_OPT_MIR_SNAP`: arena data valid for the whole compilation.
-static GLOBAL_CONCRETE: OnceLock<Mutex<HashMap<String, ty::Instance<'static>>>> =
-    OnceLock::new();
+static GLOBAL_CONCRETE: OnceLock<Mutex<HashMap<String, ty::Instance<'static>>>> = OnceLock::new();
 
 fn g_concrete() -> &'static Mutex<HashMap<String, ty::Instance<'static>>> {
     GLOBAL_CONCRETE.get_or_init(|| Mutex::new(HashMap::new()))
@@ -496,19 +545,26 @@ fn g_concrete() -> &'static Mutex<HashMap<String, ty::Instance<'static>>> {
 /// Remember the concrete instance behind `key_str` (called on every
 /// `fn_name` resolution; overwriting the same key is harmless).
 pub(crate) fn remember_concrete_inst<'tcx>(key_str: &str, inst: &ty::Instance<'tcx>) {
-    g_concrete().lock().unwrap().insert(
-        key_str.to_string(),
-        unsafe { std::mem::transmute::<ty::Instance<'tcx>, ty::Instance<'static>>(*inst) },
-    );
+    g_concrete()
+        .lock()
+        .unwrap()
+        .insert(key_str.to_string(), unsafe {
+            std::mem::transmute::<ty::Instance<'tcx>, ty::Instance<'static>>(*inst)
+        });
 }
 
 /// The concrete instance for `key_str`, if registered during this
 /// invocation (`None` for keys read from another process's state file —
 /// callers fall back to `to_inst`, i.e. identity args, the old behavior).
 fn concrete_inst<'tcx>(key_str: &str) -> Option<ty::Instance<'tcx>> {
-    g_concrete().lock().unwrap().get(key_str).copied().map(|inst| unsafe {
-        std::mem::transmute::<ty::Instance<'static>, ty::Instance<'tcx>>(inst)
-    })
+    g_concrete()
+        .lock()
+        .unwrap()
+        .get(key_str)
+        .copied()
+        .map(|inst| unsafe {
+            std::mem::transmute::<ty::Instance<'static>, ty::Instance<'tcx>>(inst)
+        })
 }
 
 /// Parsed shared state.
@@ -538,11 +594,18 @@ fn read_state() -> ParsedState {
         out_dirs: HashMap::new(),
         drained: HashSet::new(),
     };
-    let Ok(f) = std::fs::File::open(STATE_FILE) else { return st };
+    let Ok(f) = std::fs::File::open(STATE_FILE) else {
+        return st;
+    };
     for line in std::io::BufReader::new(f).lines() {
-        let line = match line { Ok(l) => l, Err(_) => continue, };
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => continue,
+        };
         let line = line.trim();
-        if line.is_empty() || line.starts_with('#') { continue; }
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
         let mut it = line.splitn(2, ' ');
         let tag = it.next().unwrap_or("");
         let rest = it.next().unwrap_or("");
@@ -567,7 +630,10 @@ fn read_state() -> ParsedState {
                 let c = it2.next().unwrap_or("");
                 let key = it2.next().unwrap_or("");
                 if !c.is_empty() && !key.is_empty() {
-                    st.order.entry(c.to_string()).or_default().push(key.to_string());
+                    st.order
+                        .entry(c.to_string())
+                        .or_default()
+                        .push(key.to_string());
                 }
             }
             "REQUIRES" => {
@@ -576,7 +642,10 @@ fn read_state() -> ParsedState {
                 let f = it2.next().unwrap_or("");
                 let t = it2.next().unwrap_or("");
                 if !f.is_empty() && !t.is_empty() {
-                    st.requires.entry(f.to_string()).or_default().insert(t.to_string());
+                    st.requires
+                        .entry(f.to_string())
+                        .or_default()
+                        .insert(t.to_string());
                 }
             }
             "OUT_DIR" => {
@@ -602,29 +671,47 @@ fn read_state() -> ParsedState {
 }
 
 fn persist_fn_name(key: &str, name: &str) {
-    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(STATE_FILE).unwrap();
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(STATE_FILE)
+        .unwrap();
     let _ = f.write_all(format!("FN_NAME {} {}\n", key, name).as_bytes());
 }
 
 fn persist_order(crate_key: &str, key: &str) {
-    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(STATE_FILE).unwrap();
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(STATE_FILE)
+        .unwrap();
     let _ = f.write_all(format!("ORDER {} {}\n", crate_key, key).as_bytes());
 }
 
 fn persist_requires(from: &str, to: &str) {
-    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(STATE_FILE).unwrap();
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(STATE_FILE)
+        .unwrap();
     let _ = f.write_all(format!("REQUIRES {} {}\n", from, to).as_bytes());
 }
 
 fn persist_out_dir(crate_key: &str, out_dir: &Path) {
-    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(STATE_FILE).unwrap();
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(STATE_FILE)
+        .unwrap();
     let _ = f.write_all(format!("OUT_DIR {} {}\n", crate_key, out_dir.display()).as_bytes());
 }
 
 /// Snapshot table for the pre-optimization MIR of local defs (Hook A).
 /// Bodies are arena-allocated and live for the whole compilation, so we can
 /// safely keep a clone here and re-read it across queries/drain cycles.
-static PRE_OPT_MIR_SNAP: OnceLock<Mutex<HashMap<rustc_hir::def_id::LocalDefId, mir::Body<'static>>>> = OnceLock::new();
+static PRE_OPT_MIR_SNAP: OnceLock<
+    Mutex<HashMap<rustc_hir::def_id::LocalDefId, mir::Body<'static>>>,
+> = OnceLock::new();
 
 /// Return a pre-optimization MIR snapshot for a local def (Hook A).
 /// Returns None if the def has no MIR (e.g. a shim).
@@ -641,7 +728,11 @@ fn persist_crates() {
     use io::Write;
     let crates = all_crates().lock().unwrap();
     let mut written = std::collections::HashSet::new();
-    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(STATE_FILE).unwrap();
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(STATE_FILE)
+        .unwrap();
     for c in crates.iter() {
         if written.insert(c) {
             let _ = f.write_all(format!("CRATE {c}\n").as_bytes());
@@ -651,10 +742,13 @@ fn persist_crates() {
 
 fn persist_drained(crate_key: &str) {
     use io::Write;
-    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(STATE_FILE).unwrap();
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(STATE_FILE)
+        .unwrap();
     let _ = f.write_all(format!("DRAINED {crate_key}\n").as_bytes());
 }
-
 
 /// Is this foreign item one of this crate's `#[js_import]` declarations?
 fn is_js_import(did: &rustc_hir::def_id::DefId) -> bool {
@@ -710,10 +804,13 @@ fn mir_hook<'tcx>(tcx: TyCtxt<'tcx>, def: LocalDefId) -> &'tcx Steal<Body<'tcx>>
     // Snapshot this pre-optimization body (arena-allocated, lives for the
     // whole compilation) so later queries/drain cycles can re-read it without
     // re-stealing the cache.
-    PRE_OPT_MIR_SNAP.get_or_init(|| Mutex::new(HashMap::new()))
+    PRE_OPT_MIR_SNAP
+        .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
         .unwrap()
-        .insert(def, unsafe { std::mem::transmute::<mir::Body<'tcx>, mir::Body<'static>>(body.clone()) });
+        .insert(def, unsafe {
+            std::mem::transmute::<mir::Body<'tcx>, mir::Body<'static>>(body.clone())
+        });
     tcx.alloc_steal_mir(body)
 }
 
@@ -747,7 +844,6 @@ fn t_wrap(param: &str) -> String {
     format!("[{param}]")
 }
 
-
 /// Tool attributes (`#[js::export]`, `#[js::import]`) require
 /// `#![feature(register_tool)]` + `#![register_tool(js)]` in user crates
 /// (users always build with our pinned nightly anyway).
@@ -764,7 +860,10 @@ fn has_attr(tcx: TyCtxt<'_>, hir_id: rustc_hir::HirId, name: &str) -> bool {
 /// (`__js_imports.<name>` indirection), `Some(Some(path))` = direct call to
 /// the true JS function at `<path>` (e.g. `document.getElementById("x")`),
 /// `Some(Err(msg))` = malformed (diagnosed at the use site).
-fn import_attr(tcx: TyCtxt<'_>, hir_id: rustc_hir::HirId) -> Option<Result<Option<String>, String>> {
+fn import_attr(
+    tcx: TyCtxt<'_>,
+    hir_id: rustc_hir::HirId,
+) -> Option<Result<Option<String>, String>> {
     use rustc_attr_ir::AttrArgs;
     let path = [Symbol::intern("js"), Symbol::intern("import")];
     for a in tcx.hir_attrs(hir_id) {
@@ -839,11 +938,7 @@ fn validate_import_path(p: &str) -> Option<String> {
     None
 }
 
-fn fn_sig_types(
-    tcx: TyCtxt<'_>,
-    did: DefId,
-    span: Span,
-) -> Result<(Vec<Ty<'_>>, Ty<'_>), String> {
+fn fn_sig_types(tcx: TyCtxt<'_>, did: DefId, span: Span) -> Result<(Vec<Ty<'_>>, Ty<'_>), String> {
     // Only functions have callable signatures: closures, impl blocks, and
     // other items that can end up in the drain order must not reach the
     // `fn_sig` query (it ICEs on them with "unexpected sort of node").
@@ -856,7 +951,11 @@ fn fn_sig_types(
             ));
         }
     }
-    let sig = tcx.fn_sig(did).instantiate_identity().skip_normalization().skip_binder();
+    let sig = tcx
+        .fn_sig(did)
+        .instantiate_identity()
+        .skip_normalization()
+        .skip_binder();
     let inputs: Vec<Ty<'_>> = sig.inputs().to_vec();
     let output = sig.output();
     let _ = span;
@@ -866,10 +965,7 @@ fn fn_sig_types(
 /// A function type crossing the boundary as a plain JS function value
 /// (fn items, fn pointers, closures).
 fn is_fn_ty(t: Ty<'_>) -> bool {
-    matches!(
-        t.kind(),
-        ty::FnDef(..) | ty::FnPtr(..) | ty::Closure(..)
-    )
+    matches!(t.kind(), ty::FnDef(..) | ty::FnPtr(..) | ty::Closure(..))
 }
 
 fn check_boundary_sig(
@@ -897,7 +993,9 @@ fn check_boundary_sig(
         match boundary_ts(tcx, t) {
             Ok(ts) if ts != "void" => ts_inputs.push(ts),
             Ok(_) => {
-                return Err(format!("{what} `{name}` has unsupported parameter type {t}"));
+                return Err(format!(
+                    "{what} `{name}` has unsupported parameter type {t}"
+                ));
             }
             Err(_) => {
                 return Err(format!(
@@ -932,10 +1030,17 @@ fn codegen_js<'tcx>(tcx: TyCtxt<'tcx>, crate_name: &str) -> Result<(), String> {
         let hir_id = tcx.local_def_id_to_hir_id(did);
         let has_exp = has_attr(tcx, hir_id, "export");
         if std::env::var("JS_DEBUG_EXPORTS").is_ok() {
-            eprintln!("codegen_js: def={:?} kind={:?} export_attr={}", did, tcx.def_kind(did), has_exp);
+            eprintln!(
+                "codegen_js: def={:?} kind={:?} export_attr={}",
+                did,
+                tcx.def_kind(did),
+                has_exp
+            );
             if has_exp {
                 use io::Write;
-                std::io::stderr().write_all(format!("  -> EXPORT FOUND: {}\n", tcx.def_path_str(did)).as_bytes()).ok();
+                std::io::stderr()
+                    .write_all(format!("  -> EXPORT FOUND: {}\n", tcx.def_path_str(did)).as_bytes())
+                    .ok();
             }
         }
         if !has_exp {
@@ -943,7 +1048,10 @@ fn codegen_js<'tcx>(tcx: TyCtxt<'tcx>, crate_name: &str) -> Result<(), String> {
         }
         let span = tcx.def_span(did);
         if tcx.def_kind(did) != DefKind::Fn {
-            tcx.dcx().span_err(span, "#[js_export] is only supported on free functions".to_string());
+            tcx.dcx().span_err(
+                span,
+                "#[js_export] is only supported on free functions".to_string(),
+            );
             continue;
         }
         let js_name = tcx
@@ -965,11 +1073,15 @@ fn codegen_js<'tcx>(tcx: TyCtxt<'tcx>, crate_name: &str) -> Result<(), String> {
             static_bodies: HashMap::new(),
         };
         let internal = crate::emit::fn_name(ctx.tcx, ctx.crate_name.as_str(), &inst);
-        crate::g_order().lock().unwrap()
+        crate::g_order()
+            .lock()
+            .unwrap()
             .entry(crate_name.into())
             .or_default()
             .push(InstKeySer::from_instance(tcx, &inst));
-        crate::g_queued().lock().unwrap()
+        crate::g_queued()
+            .lock()
+            .unwrap()
             .entry(crate_name.into())
             .or_default()
             .insert(InstKeySer::from_instance(tcx, &inst));
@@ -1046,28 +1158,42 @@ fn codegen_js<'tcx>(tcx: TyCtxt<'tcx>, crate_name: &str) -> Result<(), String> {
                 }
                 let inst = ty::Instance::new_raw(did.into(), identity);
                 let _ = crate::emit::fn_name(tcx, crate_name, &inst);
-                crate::g_order().lock().unwrap()
-                    .entry(crate_name.into()).or_default()
+                crate::g_order()
+                    .lock()
+                    .unwrap()
+                    .entry(crate_name.into())
+                    .or_default()
                     .push(InstKeySer::from_instance(tcx, &inst));
-                crate::g_queued().lock().unwrap()
-                    .entry(crate_name.into()).or_default()
+                crate::g_queued()
+                    .lock()
+                    .unwrap()
+                    .entry(crate_name.into())
+                    .or_default()
                     .insert(InstKeySer::from_instance(tcx, &inst));
                 continue;
             }
             // Non-generic free function (unchanged behavior).
             let inst = ty::Instance::mono(tcx, did.into());
             let _ = crate::emit::fn_name(tcx, crate_name, &inst);
-            crate::g_order().lock().unwrap()
-                .entry(crate_name.into()).or_default()
+            crate::g_order()
+                .lock()
+                .unwrap()
+                .entry(crate_name.into())
+                .or_default()
                 .push(InstKeySer::from_instance(tcx, &inst));
-            crate::g_queued().lock().unwrap()
-                .entry(crate_name.into()).or_default()
+            crate::g_queued()
+                .lock()
+                .unwrap()
+                .entry(crate_name.into())
+                .or_default()
                 .insert(InstKeySer::from_instance(tcx, &inst));
         } else if matches!(tcx.def_kind(did), DefKind::AssocFn) {
             // Skip trait method declarations without a default body: they
             // have no MIR, and querying it ICEs ("can't type-check body").
-            if let rustc_hir::Node::TraitItem(item) = tcx.hir_node(tcx.local_def_id_to_hir_id(did)) {
-                if let rustc_hir::TraitItemKind::Fn(_, rustc_hir::TraitFn::Required(_)) = item.kind {
+            if let rustc_hir::Node::TraitItem(item) = tcx.hir_node(tcx.local_def_id_to_hir_id(did))
+            {
+                if let rustc_hir::TraitItemKind::Fn(_, rustc_hir::TraitFn::Required(_)) = item.kind
+                {
                     continue;
                 }
             }
@@ -1075,22 +1201,37 @@ fn codegen_js<'tcx>(tcx: TyCtxt<'tcx>, crate_name: &str) -> Result<(), String> {
             // is required for the item; `mono` would ICE on it. Named by the
             // method's own name so it resolves as `__js_imports.<method>` at
             // runtime (receiver passed first, matching MIR lowering).
-            let inst = ty::Instance::new_raw(
-                did.into(),
-                ty::GenericArgs::identity_for_item(tcx, did),
-            );
+            let inst =
+                ty::Instance::new_raw(did.into(), ty::GenericArgs::identity_for_item(tcx, did));
             let _ = crate::emit::fn_name(tcx, crate_name, &inst);
-            crate::g_order().lock().unwrap()
-                .entry(crate_name.into()).or_default()
+            crate::g_order()
+                .lock()
+                .unwrap()
+                .entry(crate_name.into())
+                .or_default()
                 .push(InstKeySer::from_instance(tcx, &inst));
-            crate::g_queued().lock().unwrap()
-                .entry(crate_name.into()).or_default()
+            crate::g_queued()
+                .lock()
+                .unwrap()
+                .entry(crate_name.into())
+                .or_default()
                 .insert(InstKeySer::from_instance(tcx, &inst));
         }
     }
 
-    g_exports().lock().unwrap().entry(crate_name.into()).or_default().extend(exports);
-    if g_exports().lock().unwrap().get(crate_name).map(|v| !v.is_empty()).unwrap_or(false) {
+    g_exports()
+        .lock()
+        .unwrap()
+        .entry(crate_name.into())
+        .or_default()
+        .extend(exports);
+    if g_exports()
+        .lock()
+        .unwrap()
+        .get(crate_name)
+        .map(|v| !v.is_empty())
+        .unwrap_or(false)
+    {
         STRICT_CRATES
             .get_or_init(|| Mutex::new(HashSet::new()))
             .lock()
@@ -1124,7 +1265,10 @@ fn codegen_js<'tcx>(tcx: TyCtxt<'tcx>, crate_name: &str) -> Result<(), String> {
             Some(Ok(p)) => p,
         };
         if !matches!(item.kind, rustc_hir::ForeignItemKind::Fn(..)) {
-            tcx.dcx().span_err(span, "#[js_import] is only supported on foreign functions".to_string());
+            tcx.dcx().span_err(
+                span,
+                "#[js_import] is only supported on foreign functions".to_string(),
+            );
             continue;
         }
         let js_name = item.ident.name.to_string();
@@ -1194,7 +1338,10 @@ fn drain_crate<'tcx>(tcx: TyCtxt<'tcx>, crate_key: &str) -> HashMap<String, Stri
                 Ok(b) => b,
                 Err(e) => {
                     diag_missing_body(tcx, crate_key, inst.def_id(), e);
-                    bodies.insert(key_str.clone(), "function __stub() { throw __unreachable(); }".to_string());
+                    bodies.insert(
+                        key_str.clone(),
+                        "function __stub() { throw __unreachable(); }".to_string(),
+                    );
                     emitted.insert(key_str.clone());
                     continue;
                 }
@@ -1263,7 +1410,10 @@ fn drain_crate<'tcx>(tcx: TyCtxt<'tcx>, crate_key: &str) -> HashMap<String, Stri
                 Ok(b) => b,
                 Err(e) => {
                     diag_missing_body(tcx, crate_key, inst.def_id(), e);
-                    bodies.insert(key_str.clone(), "function __stub() { throw __unreachable(); }".to_string());
+                    bodies.insert(
+                        key_str.clone(),
+                        "function __stub() { throw __unreachable(); }".to_string(),
+                    );
                     emitted.insert(key_str.clone());
                     continue;
                 }
@@ -1296,9 +1446,8 @@ fn export_sig_of<'tcx>(
     tcx: TyCtxt<'tcx>,
     inst_key: &str,
 ) -> Result<(String, Vec<&'static str>, &'static str), String> {
-    let k = InstKeySer::parse(inst_key).ok_or_else(|| {
-        format!("export_sig_of: failed to parse instance key {}", inst_key)
-    })?;
+    let k = InstKeySer::parse(inst_key)
+        .ok_or_else(|| format!("export_sig_of: failed to parse instance key {}", inst_key))?;
     let inst = k.to_inst(tcx);
     let did = inst.def_id();
     let span = tcx.def_span(did);
@@ -1340,7 +1489,9 @@ fn assemble_js<'tcx>(
 ) -> String {
     let mut js = String::new();
     js.push_str("// @ts-nocheck\n");
-    js.push_str(&format!("// Generated by rustc_codegen_js from crate `{crate_key}`.\n"));
+    js.push_str(&format!(
+        "// Generated by rustc_codegen_js from crate `{crate_key}`.\n"
+    ));
     js.push_str("const __js_imports = globalThis.__js_imports ?? {};\n");
     js.push_str(RUNTIME_JS);
     js.push_str("\n// ---- functions ----\n");
@@ -1369,7 +1520,12 @@ fn assemble_js<'tcx>(
                 args_fp: String::new(),
             }
         });
-        let internal = crate::g_fn_names().lock().unwrap().get(&k).cloned().unwrap_or_else(|| "fn".to_string());
+        let internal = crate::g_fn_names()
+            .lock()
+            .unwrap()
+            .get(&k)
+            .cloned()
+            .unwrap_or_else(|| "fn".to_string());
         let inst = k.to_inst(tcx);
         let is_closure = matches!(tcx.def_kind(inst.def_id()), DefKind::Closure);
         let js_name: String = if is_closure {
@@ -1431,7 +1587,10 @@ fn assemble_js<'tcx>(
                     "string" => format!("return {call}[0]"),
                     _ => format!("return {call}"),
                 };
-                js.push_str(&format!("export function {wrapper}({}) {{{ret}}}\n", params.join(",")));
+                js.push_str(&format!(
+                    "export function {wrapper}({}) {{{ret}}}\n",
+                    params.join(",")
+                ));
                 js.push_str(&format!("export {{ {wrapper} as {js_name} }};\n"));
             } else {
                 // Non-boundary function: plain re-export (no coercion available).
@@ -1444,13 +1603,11 @@ fn assemble_js<'tcx>(
     js
 }
 
-fn assemble_dts<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    crate_key: &str,
-    order: &[String],
-) -> String {
+fn assemble_dts<'tcx>(tcx: TyCtxt<'tcx>, crate_key: &str, order: &[String]) -> String {
     let mut dts = String::new();
-    dts.push_str(&format!("// Boundary of crate `{crate_key}` (generated).\n"));
+    dts.push_str(&format!(
+        "// Boundary of crate `{crate_key}` (generated).\n"
+    ));
     for inst in order.iter() {
         let k = crate::InstKeySer::parse(inst).unwrap_or_else(|| {
             eprintln!("codegen_js: failed to parse inst key {inst}");
@@ -1472,7 +1629,9 @@ fn assemble_dts<'tcx>(
             Ok(v) => v,
             Err(e) => {
                 use io::Write;
-                std::io::stderr().write_all(format!("codegen_js: {e}\n").as_bytes()).ok();
+                std::io::stderr()
+                    .write_all(format!("codegen_js: {e}\n").as_bytes())
+                    .ok();
                 continue;
             }
         };
@@ -1483,7 +1642,9 @@ fn assemble_dts<'tcx>(
             .collect();
         dts.push_str(&format!(
             "export declare function {}({}): {};\n",
-            js_name, params.join(", "), ts_out
+            js_name,
+            params.join(", "),
+            ts_out
         ));
     }
     dts
@@ -1493,9 +1654,16 @@ fn write_all_bundles<'tcx>(tcx: TyCtxt<'tcx>, sess: &Session) {
     // Cargo codegens crates in separate processes, and `codegen_js` auto-queues
     // every function so each crate has a self-contained bundle; cross-crate
     // calls resolve via `globalThis.__js_imports` at runtime.
-    let current = tcx.crate_name(rustc_span::def_id::LOCAL_CRATE).to_string().replace('-', "_");
+    let current = tcx
+        .crate_name(rustc_span::def_id::LOCAL_CRATE)
+        .to_string()
+        .replace('-', "_");
     let state = read_state();
-    let out_dir = state.out_dirs.get(&current).cloned().unwrap_or_else(|| std::env::current_dir().unwrap().join("js"));
+    let out_dir = state
+        .out_dirs
+        .get(&current)
+        .cloned()
+        .unwrap_or_else(|| std::env::current_dir().unwrap().join("js"));
     let bodies = drain_crate(tcx, &current);
     // Assemble the order AFTER draining: the drain discovers new instances
     // (closures, transitive callees) and persists them to the state file, so
@@ -1518,7 +1686,11 @@ fn write_all_bundles<'tcx>(tcx: TyCtxt<'tcx>, sess: &Session) {
             }
         }
     }
-    let mut extra: Vec<String> = bodies.keys().filter(|k| !seen.contains(*k)).cloned().collect();
+    let mut extra: Vec<String> = bodies
+        .keys()
+        .filter(|k| !seen.contains(*k))
+        .cloned()
+        .collect();
     extra.sort();
     order.extend(extra);
     assemble_and_write(tcx, &current, &out_dir, &order, &bodies, sess);
@@ -1528,17 +1700,30 @@ fn write_all_bundles<'tcx>(tcx: TyCtxt<'tcx>, sess: &Session) {
     let _ = std::fs::remove_file(STATE_FILE);
     let _ = sess.dcx().note(format!(
         "codegen_js: bundle written: {}/{}.mjs + {}/{}.d.ts",
-        out_dir.display(), current, out_dir.display(), current
+        out_dir.display(),
+        current,
+        out_dir.display(),
+        current
     ));
 }
 
-fn assemble_and_write<'tcx>(tcx: TyCtxt<'tcx>, crate_key: &str, out_dir: &Path, order: &[String], bodies: &HashMap<String, String>, sess: &Session) {
+fn assemble_and_write<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    crate_key: &str,
+    out_dir: &Path,
+    order: &[String],
+    bodies: &HashMap<String, String>,
+    sess: &Session,
+) {
     let js_dir = std::env::var("JS_BUNDLES_DIR").ok();
     let out_dir = js_dir
         .map(PathBuf::from)
         .unwrap_or_else(|| out_dir.to_path_buf());
     fs::create_dir_all(&out_dir).unwrap_or_else(|e| {
-        sess.dcx().fatal(format!("codegen_js: failed to create dir {:?}: {e}", out_dir));
+        sess.dcx().fatal(format!(
+            "codegen_js: failed to create dir {:?}: {e}",
+            out_dir
+        ));
     });
     let exports = Vec::new();
     let js = assemble_js(tcx, crate_key, order, bodies, &exports);

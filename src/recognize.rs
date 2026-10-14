@@ -528,9 +528,14 @@ fn is_convert_trait(tcx: TyCtxt<'_>, def_id: rustc_hir::def_id::DefId) -> bool {
 /// If `arg` is an opaque impl-trait param (`impl Into<T>` / `impl From<S>`)
 /// whose projection has a single output type, return that output type
 /// (the second alias arg for `Into<T>`/`From<S>`). Otherwise None.
-fn subst_opaque_param<'tcx>(tcx: TyCtxt<'tcx>, arg: ty::GenericArg<'tcx>) -> Option<ty::GenericArg<'tcx>> {
+fn subst_opaque_param<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    arg: ty::GenericArg<'tcx>,
+) -> Option<ty::GenericArg<'tcx>> {
     let kind = arg.kind();
-    let ty::GenericArgKind::Type(ty) = kind else { return None };
+    let ty::GenericArgKind::Type(ty) = kind else {
+        return None;
+    };
     match ty.kind() {
         ty::TyKind::Param(_) => None,
         ty::TyKind::Alias(_, alias_ty) => {
@@ -540,23 +545,23 @@ fn subst_opaque_param<'tcx>(tcx: TyCtxt<'tcx>, arg: ty::GenericArg<'tcx>) -> Opt
                     // `point_named`): the hidden type normalizes to the projection
                     // output (`<A as Into<T>>::Output` -> `T`), which is the type
                     // rustc uses to monomorphize `Into::into` at a call site.
-                    let hidden = tcx
-                        .normalize_erasing_regions(mono_env(), tcx.type_of(*def_id).instantiate_identity());
-                    let is_conv = |ty: ty::Ty<'tcx>| {
-                        match ty.kind() {
-                            ty::TyKind::Alias(_, a) => match &a.kind {
-                                ty::AliasTyKind::Projection { def_id } => {
-                                    let n = tcx.item_name(*def_id);
-                                    let t = tcx.parent(*def_id);
-                                    let trait_name = tcx.item_name(t);
-                                    n == rustc_span::symbol::sym::Output
-                                        && (trait_name == rustc_span::symbol::sym::Into
-                                            || trait_name == rustc_span::symbol::sym::From)
-                                }
-                                _ => false,
-                            },
+                    let hidden = tcx.normalize_erasing_regions(
+                        mono_env(),
+                        tcx.type_of(*def_id).instantiate_identity(),
+                    );
+                    let is_conv = |ty: ty::Ty<'tcx>| match ty.kind() {
+                        ty::TyKind::Alias(_, a) => match &a.kind {
+                            ty::AliasTyKind::Projection { def_id } => {
+                                let n = tcx.item_name(*def_id);
+                                let t = tcx.parent(*def_id);
+                                let trait_name = tcx.item_name(t);
+                                n == rustc_span::symbol::sym::Output
+                                    && (trait_name == rustc_span::symbol::sym::Into
+                                        || trait_name == rustc_span::symbol::sym::From)
+                            }
                             _ => false,
-                        }
+                        },
+                        _ => false,
                     };
                     if is_conv(hidden) {
                         return Some(alias_ty.args[1]);
@@ -621,7 +626,9 @@ pub fn blocklisted(path: &str, in_std: bool) -> Option<&'static str> {
         return Some("SIMD intrinsics are rejected outright");
     }
     if has("libm") {
-        return Some("libm functions are not implemented (use the f32/f64 methods the backend supports)");
+        return Some(
+            "libm functions are not implemented (use the f32/f64 methods the backend supports)",
+        );
     }
     if path.contains("stdin") {
         return Some("stdin is not supported");
@@ -668,14 +675,8 @@ fn conversion_of_inst<'tcx>(
     // `type_at(1)` would ICE. Only take the fast path when both leading
     // args are types; otherwise read Self/Target from the impl trait ref.
     let first_two_types = inst.args.len() >= 2
-        && matches!(
-            inst.args[0].kind(),
-            ty::GenericArgKind::Type(_)
-        )
-        && matches!(
-            inst.args[1].kind(),
-            ty::GenericArgKind::Type(_)
-        );
+        && matches!(inst.args[0].kind(), ty::GenericArgKind::Type(_))
+        && matches!(inst.args[1].kind(), ty::GenericArgKind::Type(_));
     let (dst, src) = if first_two_types {
         if is_from {
             (
@@ -700,15 +701,12 @@ fn conversion_of_inst<'tcx>(
         if !matches!(tcx.def_kind(parent), rustc_hir::def::DefKind::Impl { .. }) {
             return None;
         }
-        let tr = tcx
-            .normalize_erasing_regions(
-                mono_env(),
-                tcx.impl_trait_ref(parent).instantiate(tcx, inst.args),
-            );
+        let tr = tcx.normalize_erasing_regions(
+            mono_env(),
+            tcx.impl_trait_ref(parent).instantiate(tcx, inst.args),
+        );
         let mut ts = tr.args.iter().filter_map(|a| match a.kind() {
-            ty::GenericArgKind::Type(t) => {
-                Some(crate::tyutil::subst_ty(tcx, inst.args, t))
-            }
+            ty::GenericArgKind::Type(t) => Some(crate::tyutil::subst_ty(tcx, inst.args, t)),
             _ => None,
         });
         let (self_ty, targ_ty) = match (ts.next(), ts.next()) {
@@ -768,9 +766,10 @@ fn conversion_of_inst<'tcx>(
             _ if is_string_ty(src) => {
                 return Some(Ok(Callee::Shim(Shim::PointRefFromStr)));
             }
-            ty::Tuple(tys) if tys.len() == 2
-                && matches!(tys[0].kind(), ty::Float(ty::FloatTy::F64))
-                && matches!(tys[1].kind(), ty::Float(ty::FloatTy::F64)) =>
+            ty::Tuple(tys)
+                if tys.len() == 2
+                    && matches!(tys[0].kind(), ty::Float(ty::FloatTy::F64))
+                    && matches!(tys[1].kind(), ty::Float(ty::FloatTy::F64)) =>
             {
                 return Some(Ok(Callee::Shim(Shim::PointRefFromTuple)));
             }
@@ -809,7 +808,6 @@ fn conversion_of_inst<'tcx>(
     // Other pairs: emit the real body (Into's forwards are trivial).
     None
 }
-
 
 /// `HashMap` public API → shim. Only the methods with a JS `Map` equivalent
 /// are mapped; iteration order is unspecified in Rust for `HashMap`, so the
@@ -920,9 +918,7 @@ pub fn classify_shim(path: &str, in_std: bool) -> Option<Shim> {
         _ if es(path, &["Clone", "clone"]) => Shim::CloneFn,
         _ if es(path, &["ToString", "to_string"]) => Shim::ToStringFn,
         _ if es(path, &["hint", "must_use"]) => Shim::MustUseFn,
-        _ if es(path, &["f32", "clamp"]) | es(path, &["f64", "clamp"]) => {
-            Shim::FloatClamp
-        }
+        _ if es(path, &["f32", "clamp"]) | es(path, &["f64", "clamp"]) => Shim::FloatClamp,
         _ if es(path, &["RangeInclusive", "new"]) => Shim::RangeIncNew,
         _ if es(path, &["RangeInclusive", "contains"]) => Shim::RangeIncContains,
         _ if es(path, &["Write", "write_fmt"]) => Shim::WriteFmtTrait,
@@ -1037,7 +1033,9 @@ pub fn classify_shim(path: &str, in_std: bool) -> Option<Shim> {
             Shim::SliceConcat
         }
         _ if es(path, &["slice", "copy_from_slice"]) => Shim::SliceCopyFromSlice,
-        _ if es(path, &["SliceConcatExt", "join"]) || es(path, &["slice", "join"]) => Shim::SliceJoin,
+        _ if es(path, &["SliceConcatExt", "join"]) || es(path, &["slice", "join"]) => {
+            Shim::SliceJoin
+        }
         _ if es(path, &["slice", "contains"]) => Shim::SliceContains,
         _ if es(path, &["slice", "starts_with"]) => Shim::SliceStartsWith,
         _ if es(path, &["slice", "ends_with"]) => Shim::SliceEndsWith,
@@ -1181,7 +1179,11 @@ pub fn classify_panic(path: &str, in_std: bool) -> Option<PanicKind> {
         _ if ends(path, "core::panicking::panic_nounwind") => PanicKind::Nounwind,
         _ if ends(path, "core::panicking::panic_nounwind_fmt") => PanicKind::Fmt,
         _ if ends(path, "core::panicking::assert_failed") => PanicKind::AssertFailed,
-        _ if ends(path, "core::panicking::panic_misaligned_pointer_dereference") => {
+        _ if ends(
+            path,
+            "core::panicking::panic_misaligned_pointer_dereference",
+        ) =>
+        {
             PanicKind::Misaligned
         }
         _ if ends(path, "alloc::alloc::handle_alloc_error") => PanicKind::Generic,
@@ -1267,8 +1269,10 @@ pub fn classify_intrinsic(name: &str) -> Intrinsic {
         "assert_inhabited" | "assert_zero_valid" | "assert_mem_uninitialized_valid" => {
             AssertZeroValid
         }
-        "prefetch_read_instruction" | "prefetch_write_instruction"
-        | "prefetch_read_data" | "prefetch_write_data" => AssertZeroValid,
+        "prefetch_read_instruction"
+        | "prefetch_write_instruction"
+        | "prefetch_read_data"
+        | "prefetch_write_data" => AssertZeroValid,
         "assume" => AssertZeroValid, // statement-level assume is separate; call form -> ()
         // Floats (real spellings are `<op>f<width>`; f16/f128 stay
         // unsupported at the type level, so only f32/f64 are mapped).
@@ -1297,9 +1301,7 @@ pub fn classify_intrinsic(name: &str) -> Intrinsic {
         "ceil" | "ceilf32" | "ceilf64" => Float(Ceil),
         "trunc" | "truncf32" | "truncf64" => Float(Trunc),
         "round" | "roundf32" | "roundf64" => Float(Round),
-        "round_ties_even" | "round_ties_even_f32" | "round_ties_even_f64" => {
-            Float(RoundTiesEven)
-        }
+        "round_ties_even" | "round_ties_even_f32" | "round_ties_even_f64" => Float(RoundTiesEven),
         "fract" | "fractf32" => Float(Fract),
         "fabs" | "fabsf32" => Float(Abs),
         "minnumf32" | "minnumf64" => Float(Min),
@@ -1501,10 +1503,8 @@ fn inherent_int_self(tcx: TyCtxt<'_>, did: DefId) -> bool {
     if !matches!(tcx.def_kind(parent), rustc_hir::def::DefKind::Impl { .. }) {
         return false;
     }
-    let self_ty = tcx.normalize_erasing_regions(
-        mono_env(),
-        tcx.type_of(parent).instantiate_identity(),
-    );
+    let self_ty =
+        tcx.normalize_erasing_regions(mono_env(), tcx.type_of(parent).instantiate_identity());
     matches!(
         repr_of(tcx, self_ty),
         crate::tyutil::Repr::Num(_) | crate::tyutil::Repr::Big(_)
@@ -1514,12 +1514,7 @@ fn inherent_int_self(tcx: TyCtxt<'_>, did: DefId) -> bool {
 /// Map integer min/max/clamp/abs methods (and `cmp::{min,max}` free fns)
 /// to relational shims. The ternary form is valid for both the JS-number
 /// (≤32-bit) and BigInt (64/128-bit) representations, unlike `Math.min`.
-pub fn classify_int_method(
-    tcx: TyCtxt<'_>,
-    did: DefId,
-    path: &str,
-    in_std: bool,
-) -> Option<Shim> {
+pub fn classify_int_method(tcx: TyCtxt<'_>, did: DefId, path: &str, in_std: bool) -> Option<Shim> {
     use crate::tyutil::ends_seg as es;
     if !in_std {
         return None;
@@ -1567,8 +1562,7 @@ pub fn classify_int_method(
         return None;
     }
     let int_recv = [
-        "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128",
-        "usize",
+        "i8", "i16", "i32", "i64", "i128", "isize", "u8", "u16", "u32", "u64", "u128", "usize",
     ]
     .iter()
     .any(|r| es(path, &[r, method]))
@@ -1622,7 +1616,15 @@ pub fn resolve_and_classify<'tcx>(
     // trait contract (clippy::partialeq_ne_impl), so `!eq` is always correct.
     if crate::tyutil::ends_seg(&path, &["PartialEq", "ne"]) {
         if let Some(eq_did) = ne_eq_sibling(tcx, did) {
-            match resolve_and_classify(tcx, eq_did, args, _span, is_js_import, enclosing_params, enclosing_fn_def_id) {
+            match resolve_and_classify(
+                tcx,
+                eq_did,
+                args,
+                _span,
+                is_js_import,
+                enclosing_params,
+                enclosing_fn_def_id,
+            ) {
                 Ok(inner) => return Ok(Callee::Not(Box::new(inner))),
                 // Fall through: the `ne` flow below reports the failure.
                 Err(_) => {}
@@ -1643,8 +1645,9 @@ pub fn resolve_and_classify<'tcx>(
             if let Some(fn_def_id) = enclosing_fn_def_id {
                 let generics = tcx.generics_of(fn_def_id);
                 if (p.index as usize) < generics.own_params.len() {
-                    if let ty::GenericParamDefKind::Type { synthetic: true, .. } =
-                        generics.own_params[p.index as usize].kind
+                    if let ty::GenericParamDefKind::Type {
+                        synthetic: true, ..
+                    } = generics.own_params[p.index as usize].kind
                     {
                         return Ok(Callee::Shim(Shim::IntoFn));
                     }
@@ -1817,10 +1820,16 @@ pub fn resolve_and_classify<'tcx>(
     // `<String as Deref>::deref` — trait method whose path loses the type
     // name after normalization; dispatch on Self.
     if in_std && crate::tyutil::ends_seg(&path, &["Deref", "deref"]) {
-        let self_ty = crate::tyutil::subst_ty(tcx, args, args.iter().find_map(|a| match a.kind() {
-            ty::GenericArgKind::Type(t) => Some(t),
-            _ => None,
-        }).unwrap_or(tcx.types.str_));
+        let self_ty = crate::tyutil::subst_ty(
+            tcx,
+            args,
+            args.iter()
+                .find_map(|a| match a.kind() {
+                    ty::GenericArgKind::Type(t) => Some(t),
+                    _ => None,
+                })
+                .unwrap_or(tcx.types.str_),
+        );
         if let ty::Adt(def, _) = self_ty.kind() {
             let p = def_path(tcx, def.did());
             if crate::tyutil::is_std_item(tcx, def.did())
@@ -1833,7 +1842,9 @@ pub fn resolve_and_classify<'tcx>(
     let env = crate::tyutil::mono_env();
     let inst = match ty::Instance::try_resolve(tcx, env, did, args) {
         Ok(Some(inst)) => {
-            let concrete: Vec<ty::GenericArg<'tcx>> = inst.args.iter()
+            let concrete: Vec<ty::GenericArg<'tcx>> = inst
+                .args
+                .iter()
                 .map(|arg| subst_opaque_param(tcx, arg).unwrap_or(arg))
                 .collect();
             if inst.args != tcx.mk_args(&concrete) {

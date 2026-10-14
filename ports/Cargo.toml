@@ -1,7 +1,9 @@
 cargo-features = ["profile-rustflags"]
 # Workspace for rustc_codegen_js browser ports.
-# Crates built to JavaScript are selected via per-package codegen-backend
-# profiles (see .cargo/config.toml). Everything else builds natively.
+# `cargo build-js` (see `tools/cargo-build-js`) compiles workspace crates
+# to JavaScript. `dgs-site` (normal-)depends on `dgs`/`dgs-playground`, so
+# one command builds everything from a clean target dir:
+#   cargo build-js -p dgs-site
 [workspace]
 resolver = "2"
-members = ["dom", "dgs-browser", "typst-browser", "dgs-playground", "dgs-quicktest", "color-test", "dgs-site"]
+members = ["dgs-playground", "dgs-quicktest", "dgs-site"]

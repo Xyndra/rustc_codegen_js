@@ -30,7 +30,6 @@ impl<'tcx> ConstCx<'tcx> {
 
 /// Render a `mir::Const` to a JS expression.
 pub fn render_mir_const<'tcx>(cx: &ConstCx<'tcx>, c: mir::Const<'tcx>) -> Result<String, String> {
-
     let ty = cx.ty(c.ty());
 
     match c {
@@ -41,7 +40,11 @@ pub fn render_mir_const<'tcx>(cx: &ConstCx<'tcx>, c: mir::Const<'tcx>) -> Result
         }
         mir::Const::Unevaluated(uc, _) => {
             let args = subst_unchecked(cx.tcx, cx.args, uc.args);
-            let uc = mir::UnevaluatedConst { def: uc.def, args, promoted: uc.promoted };
+            let uc = mir::UnevaluatedConst {
+                def: uc.def,
+                args,
+                promoted: uc.promoted,
+            };
             // Peel auto-ref promotion chains first: `&&T` (operator autoref
             // applied to a promoted `&T`) evaluates to a pointer scalar the
             // renderer cannot follow, but the promoted body materializes the
@@ -186,7 +189,11 @@ fn render_ty_const<'tcx>(
                     ty::Str | ty::Ref(..) => Ok(js_string(bytes)),
                     _ => Ok(format!(
                         "[{}]",
-                        bytes.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(",")
+                        bytes
+                            .iter()
+                            .map(|b| b.to_string())
+                            .collect::<Vec<_>>()
+                            .join(",")
                     )),
                 };
             }
@@ -279,9 +286,7 @@ fn render_branch<'tcx>(
         ty::Ref(_, inner, _) if matches!(inner.kind(), ty::Str) => {
             let bytes: Vec<u8> = branch
                 .iter()
-                .map(|ct| {
-                    ct.try_to_value()?.try_to_leaf().map(|l| l.to_u8())
-                })
+                .map(|ct| ct.try_to_value()?.try_to_leaf().map(|l| l.to_u8()))
                 .collect::<Option<_>>()
                 .ok_or_else(|| format!("bad str constant of type {ty}"))?;
             Ok(js_string(&bytes))
@@ -316,10 +321,9 @@ pub fn render_const_value<'tcx>(
                         .layout_of(mono_env().as_query_input(ty))
                         .map_err(|_| format!("bad layout for constant of type {ty}"))?;
                     if let rustc_abi::Variants::Single { index } = &layout.variants {
-                        let d = crate::tyutil::discriminant_value(cx.tcx, ty, *index)
-                            .ok_or_else(|| {
-                                format!("bad enum discriminant for constant of type {ty}")
-                            })?;
+                        let d = crate::tyutil::discriminant_value(cx.tcx, ty, *index).ok_or_else(
+                            || format!("bad enum discriminant for constant of type {ty}"),
+                        )?;
                         return Ok(format!("{{t:{d},v:[]}}"));
                     }
                 }
@@ -336,7 +340,11 @@ pub fn render_const_value<'tcx>(
                     // Byte slice or u8 array materialized as Slice.
                     Ok(format!(
                         "[{}]",
-                        bytes.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(",")
+                        bytes
+                            .iter()
+                            .map(|b| b.to_string())
+                            .collect::<Vec<_>>()
+                            .join(",")
                     ))
                 }
             }
@@ -406,7 +414,9 @@ fn const_value_at<'tcx>(
                     return Err("uninhabited enum constant".to_string());
                 }
                 rustc_abi::Variants::Single { index } => *index,
-                rustc_abi::Variants::Multiple { tag, tag_encoding, .. } => {
+                rustc_abi::Variants::Multiple {
+                    tag, tag_encoding, ..
+                } => {
                     match tag_encoding {
                         rustc_abi::TagEncoding::Direct => {
                             let discr_size = tag.size(&cx.tcx).bytes() as usize;
@@ -430,8 +440,7 @@ fn const_value_at<'tcx>(
                             // public `start`/`last` fields, no accessors.)
                             let start = niche_variants.start.as_u32() as u128;
                             let last = niche_variants.last.as_u32();
-                            let i =
-                                tag_val.wrapping_sub(*niche_start).wrapping_add(start);
+                            let i = tag_val.wrapping_sub(*niche_start).wrapping_add(start);
                             u32::try_from(i)
                                 .ok()
                                 .map(rustc_abi::VariantIdx::from_u32)
@@ -447,9 +456,11 @@ fn const_value_at<'tcx>(
             let variant = def.variant(variant_idx);
             let mut out = Vec::with_capacity(variant.fields.len());
             for (i, f) in variant.fields.iter().enumerate() {
-                let fty = cx.ty(
-                    subst_unchecked(cx.tcx, args, cx.tcx.type_of(f.did).skip_binder()),
-                );
+                let fty = cx.ty(subst_unchecked(
+                    cx.tcx,
+                    args,
+                    cx.tcx.type_of(f.did).skip_binder(),
+                ));
                 let off = offset + layout.fields.offset(i).bytes();
                 out.push(const_value_at(cx, alloc, fty, off)?);
             }
@@ -463,9 +474,11 @@ fn const_value_at<'tcx>(
             .fields
             .iter()
             .map(|f| {
-                cx.ty(
-                    subst_unchecked(cx.tcx, args, cx.tcx.type_of(f.did).skip_binder()),
-                )
+                cx.ty(subst_unchecked(
+                    cx.tcx,
+                    args,
+                    cx.tcx.type_of(f.did).skip_binder(),
+                ))
             })
             .collect(),
         _ => return Err(format!("unsupported aggregate constant of type {ty}")),
@@ -650,9 +663,17 @@ fn render_f64(f: f64) -> String {
     if f.is_nan() {
         "NaN".to_string()
     } else if f.is_infinite() {
-        if f > 0.0 { "Infinity".to_string() } else { "-Infinity".to_string() }
+        if f > 0.0 {
+            "Infinity".to_string()
+        } else {
+            "-Infinity".to_string()
+        }
     } else if f == 0.0 {
-        if f.is_sign_negative() { "-0".to_string() } else { "0".to_string() }
+        if f.is_sign_negative() {
+            "-0".to_string()
+        } else {
+            "0".to_string()
+        }
     } else {
         format!("{:?}", f)
     }

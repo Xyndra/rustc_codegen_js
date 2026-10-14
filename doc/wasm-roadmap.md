@@ -52,14 +52,14 @@ Make the shared JS<->Rust boundary types compatible with wasm-bindgen-style
 conventions while keeping current JS semantics.
 
 - Document exact representations in `doc/limits.md` / new section here:
-  - integers up to 32 bits as JS `number`, 64/128 as `BigInt`;
-  - `&str`/`String` as JS string; slices as JS `Array`;
-  - structs/tuples as JS arrays; enums as `{t,v}`.
+    - integers up to 32 bits as JS `number`, 64/128 as `BigInt`;
+    - `&str`/`String` as JS string; slices as JS `Array`;
+    - structs/tuples as JS arrays; enums as `{t,v}`.
 - Define a small `boundary.js` adapter layer for wasm interop:
-  - `jsString <-> wasm string` (length + pointer into linear memory or
-    built-in `WebAssembly.Memory`).
-  - number/BigInt conversions and checked truncation.
-  - ADT array <-> linear-memory struct layouts.
+    - `jsString <-> wasm string` (length + pointer into linear memory or
+      built-in `WebAssembly.Memory`).
+    - number/BigInt conversions and checked truncation.
+    - ADT array <-> linear-memory struct layouts.
 - Keep `boundary_ts()` (`src/lib.rs`) as JS-facing truth; add wasm-side
   type mapping docs rather than changing all core types.
 - Add opt-in `#[js::import = "..."]` paths that can reference wasm exports.
@@ -69,12 +69,12 @@ Exit: one struct and one enum round-trip across JS<->wasm in tests.
 ### M2: Host imports / exports (1 week)
 
 - Standardize exported symbols:
-  - JS side exports through `globalThis.__js_imports` (already).
-  - Wasm side exports through a stable namespace (e.g.
-    `globalThis.__wasm_imports`) or direct wasm imports.
+    - JS side exports through `globalThis.__js_imports` (already).
+    - Wasm side exports through a stable namespace (e.g.
+      `globalThis.__wasm_imports`) or direct wasm imports.
 - Add a resolver that, at runtime, wires JS exports as wasm imports:
-  - function imports with the M1 adapter.
-  - memory import (`env.memory` or shared `WebAssembly.Memory`).
+    - function imports with the M1 adapter.
+    - memory import (`env.memory` or shared `WebAssembly.Memory`).
 - Support calling async host functions from wasm via JSPI (see M3), not via
   blocking.
 - Keep browser and Node/Bun paths both working; detect available memory.
@@ -89,9 +89,9 @@ already has sync host calls; wasm interop can use JSPI for Rust `async fn`
 or blocking host calls only when needed.
 
 - Add JS-side async export/import shims:
-  - Mark imported funcs as suspending in wasm imports
-    (`WebAssembly.Suspending` or JSPI transform pipeline).
-  - Ensure wrappers return promises and unwrap values/panics properly.
+    - Mark imported funcs as suspending in wasm imports
+      (`WebAssembly.Suspending` or JSPI transform pipeline).
+    - Ensure wrappers return promises and unwrap values/panics properly.
 - Define panic propagation across the boundary (JS `RustPanic` / wasm trap).
 - Document required runtime support (Chrome/Node versions; polyfill limits).
 

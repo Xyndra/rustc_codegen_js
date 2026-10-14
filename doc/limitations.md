@@ -25,22 +25,22 @@ what is not, and the semantics that differ from native Rust.
 
 ## Type representation
 
-| Rust type                       | JS representation                        |
-|---------------------------------|------------------------------------------|
-| `bool`                          | boolean                                  |
-| `char` / i8–i32 / u8–u32 / usize / isize | JS number (32-bit)               |
-| i64 / u64 / i128 / u128         | `BigInt`                                 |
-| f32 / f64                       | JS number (`f32` narrowed with `Math.fround` at casts/stores) |
-| `&str`, `str`                   | JS string                                |
-| `String`                        | 1-element array `[str]` (mutable cell)   |
-| `Vec<T>`, `[T]`, `[T; N]`       | JS array                                 |
-| `()` / ZSTs                     | `undefined`                              |
-| tuple                           | JS array                                 |
-| struct / union / `Cell`         | JS array, positional fields              |
-| enum                            | `{ t: discriminant, v: [...] }`          |
-| fn item / closure / fn pointer  | JS function (closures take `env` first)  |
-| `&T`, `&mut T`, `Box<T>`, `Rc<T>`, `Arc<T>` | transparent (inner value)   |
-| `RefCell<T>` guards             | transparent (borrow flags are **not** enforced) |
+| Rust type                                   | JS representation                                             |
+| ------------------------------------------- | ------------------------------------------------------------- |
+| `bool`                                      | boolean                                                       |
+| `char` / i8–i32 / u8–u32 / usize / isize    | JS number (32-bit)                                            |
+| i64 / u64 / i128 / u128                     | `BigInt`                                                      |
+| f32 / f64                                   | JS number (`f32` narrowed with `Math.fround` at casts/stores) |
+| `&str`, `str`                               | JS string                                                     |
+| `String`                                    | 1-element array `[str]` (mutable cell)                        |
+| `Vec<T>`, `[T]`, `[T; N]`                   | JS array                                                      |
+| `()` / ZSTs                                 | `undefined`                                                   |
+| tuple                                       | JS array                                                      |
+| struct / union / `Cell`                     | JS array, positional fields                                   |
+| enum                                        | `{ t: discriminant, v: [...] }`                               |
+| fn item / closure / fn pointer              | JS function (closures take `env` first)                       |
+| `&T`, `&mut T`, `Box<T>`, `Rc<T>`, `Arc<T>` | transparent (inner value)                                     |
+| `RefCell<T>` guards                         | transparent (borrow flags are **not** enforced)               |
 
 ### Known gaps
 
@@ -61,12 +61,12 @@ MIR is ever emitted for these. The following adaptors are implemented:
 `zip`, `chain`, `take`, `skip`, `step_by`, `cloned`, `copied`, `count`,
 `last`, `nth`, `position`, `find`, `any`, `all`, `fold`, `for_each`, `sum`,
 `product`, `min`, `max`, `min_by`, `max_by`, `map_or`, `map_or_else`,
- `and_then`, `ok_or`, `or_else`, `unwrap_or`, `unwrap_or_else`,
- `unwrap_or_default`, `filter_map`-like `inspect`, `collect`, `eq`.
- Conversions through `From`/`Into` are recognized by trait (not by path text,
- which erases `<...>` groups): `String::from(&str/String)`, `Vec::from([T; N])`
- (including the const-generic `[T; N]` impl, whose args carry `N` as a const),
- `Vec::from(&[T])`, and reflexive `From<T> for T` (identity) are all mapped.
+`and_then`, `ok_or`, `or_else`, `unwrap_or`, `unwrap_or_else`,
+`unwrap_or_default`, `filter_map`-like `inspect`, `collect`, `eq`.
+Conversions through `From`/`Into` are recognized by trait (not by path text,
+which erases `<...>` groups): `String::from(&str/String)`, `Vec::from([T; N])`
+(including the const-generic `[T; N]` impl, whose args carry `N` as a const),
+`Vec::from(&[T])`, and reflexive `From<T> for T` (identity) are all mapped.
 
 **Not implemented (diagnosed):** `HashMap`/`HashSet` (need a real hash-table
 runtime with a `Hash` impl), `BTreeMap`/`BTreeSet` (ordered-table runtime),
@@ -121,7 +121,7 @@ The boundary is opt-in per item:
   no-ops.
 - For GC-managed types (`Vec`, `String`, `Box`, our object/enum reprs) the
   drop is a **no-op**; values are reclaimed by the JS engine when no longer
-  referenced. Drop *order* is LIFO in the MIR (nested scopes unwind in
+  referenced. Drop _order_ is LIFO in the MIR (nested scopes unwind in
   reverse construction order), but since drops don't do anything this is
   verified implicitly by correct execution after scope exit rather than by
   observing drop side effects.

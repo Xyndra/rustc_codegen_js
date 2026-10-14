@@ -6,9 +6,16 @@ edition = "2021"
 [lib]
 crate-type = ["rlib"]
 
-[build-dependencies]
+[dependencies]
+# True dependencies: cargo builds these crates (and their JavaScript
+# bundles) before this crate, so a single `cargo build-js -p dgs-site`
+# works from a clean target dir. They are NOT build-dependencies:
+# those would link natively into build.rs, but under `cargo build-js`
+# their rlibs are JavaScript stubs.
 dgs-playground = { version = "0.1.0", path = "../dgs-playground" }
 dgs = { version = "0.1", default-features = false }
+
+[build-dependencies]
 oxc_minifier = "0.154.0"
 oxc_allocator = "0.154.0"
 oxc_parser = "0.154.0"

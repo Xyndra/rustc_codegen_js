@@ -44,5 +44,3 @@ Output: `ports/target/<profile>/dgs-playground/index.html` (plus `bundle.mjs`, `
 - `src/` — backend implementation
 - `ports/` — browser-targeted Rust crates + site
 - `tests/` — smoke + differential harness
-```
-filePath: /run/media/xyndra/Samsung/Code/Rust/rustc_codegen_js/README.md

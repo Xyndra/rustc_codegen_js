@@ -4,13 +4,17 @@
 // a two-line loader that runs the Rust `init()` on load. The crate's imports
 // bind true JS functions directly, and the Rust code arms every button
 // itself, so the shell carries no shims and no wiring. This script fills in
-// only the two bundle slots, verbatim, with the backend bundles cargo just
-// built (dependencies are compiled before this script runs, so both bundles
-// are fresh):
+// only the bundle slot, verbatim, with the backend bundles:
 //
-// - `/*BUNDLE_DGS*/` <- `dgs.mjs` (must load first: cross-crate calls resolve
-//   through `globalThis.__js_imports` at runtime, in dependency order);
-// - `/*BUNDLE_PLAYGROUND*/` <- `dgs_playground.mjs`.
+// - `/*BUNDLE*/` <- minified `dgs.mjs` + `dgs_playground.mjs` combined.
+//
+// `dgs` and `dgs-playground` are normal `[dependencies]` of this crate, so
+// cargo builds them (and their bundles) before this crate and a single
+// `cargo build-js -p dgs-site` works from a clean target dir. This script
+// reads the bundles from the target dir and fails loudly when they are
+// missing. They are deliberately NOT build-dependencies: those would link
+// natively into this script, but under `cargo build-js` their rlibs are
+// JavaScript stubs, so the native build-script link would fail.
 //
 // Everything lands under `<target>/<profile>/dgs-playground/` (mirroring the
 // `tests/corpus/target/<name>/` convention): `index.html` plus copies of both
@@ -32,7 +36,6 @@ const PLAYGROUND_PKG: &str = "dgs-playground";
 const DGS_PKG: &str = "dgs";
 
 fn main() {
-    extern crate dgs_playground as _;
     let manifest = PathBuf::from(env_str("CARGO_MANIFEST_DIR"));
     let profile = env_str("PROFILE");
 

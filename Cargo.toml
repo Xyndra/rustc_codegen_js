@@ -9,3 +9,7 @@ license = "MIT OR Apache-2.0"
 [lib]
 name = "codegen_js"
 crate-type = ["dylib"]
+
+[workspace]
+members = ["tools/cargo-build-js"]
+resolver = "2"

@@ -1,14 +1,18 @@
 cargo-features = ["profile-rustflags"]
+
 [package]
 name = "cargo-build-js"
 version = "0.1.0"
 edition = "2021"
-description = "Cargo command wrapper that builds rustc_codegen_js and then compiles with it"
+description = "Cargo wrapper for rustc_codegen_js (embedded backend, no configs)"
 license = "MIT"
 
 [[bin]]
 name = "cargo-build-js"
 path = "src/main.rs"
 
-[profile.release]
-opt-level = 3
+[dependencies]
+serde_json = "1"
+
+[build-dependencies]
+rustc_codegen_js = { path = "../.." }

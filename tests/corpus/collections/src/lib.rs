@@ -13,7 +13,13 @@ pub fn run() -> String {
     v.push(2);
     v.push(3);
     v.push(4);
-    s.push_str(&format!("{} {} {} {} ", v.len(), v[0], v[3], v[v.len() - 1]));
+    s.push_str(&format!(
+        "{} {} {} {} ",
+        v.len(),
+        v[0],
+        v[3],
+        v[v.len() - 1]
+    ));
     s.push_str(&format!("{:?} ", v));
     s.push_str(&format!("{:?} ", v.pop()));
     s.push_str(&format!("{:?} {:?} ", v.first(), v.last()));
@@ -41,7 +47,13 @@ pub fn run() -> String {
     // let _ = v[100];
     // slices
     let sl: &[i32] = &z;
-    s.push_str(&format!("{} {} {:?} {:?} ", sl.len(), sl[0], sl.first(), sl.last()));
+    s.push_str(&format!(
+        "{} {} {:?} {:?} ",
+        sl.len(),
+        sl[0],
+        sl.first(),
+        sl.last()
+    ));
     let m = &sl[1..3];
     s.push_str(&format!("{:?} ", m));
     let mut sum = 0i32;
@@ -63,7 +75,10 @@ pub fn run() -> String {
     s.push_str(&format!("{} ", a.is_some()));
     s.push_str(&format!("{} ", a.is_none()));
     s.push_str(&format!("{:?} ", a.map(|x| x * 2)));
-    s.push_str(&format!("{:?} ", a.and_then(|x| if x > 0 { Some(-x) } else { None })));
+    s.push_str(&format!(
+        "{:?} ",
+        a.and_then(|x| if x > 0 { Some(-x) } else { None })
+    ));
     s.push_str(&format!("{:?} ", a.unwrap_or(0) + b.unwrap_or(7)));
     s.push_str(&format!("{:?} ", a.ok_or("err")));
     s.push_str(&format!("{:?} ", b.ok_or("err")));
@@ -93,12 +108,19 @@ pub fn run() -> String {
     let opts: Vec<Option<i32>> = vec![Some(1), None, Some(3)];
     let flat: Vec<i32> = opts.into_iter().flatten().collect();
     s.push_str(&format!("{:?} ", flat));
-    let joined = it.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",");
+    let joined = it
+        .iter()
+        .map(|x| x.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
     s.push_str(&format!("{} ", joined));
     // vec of tuples / nested
     let pairs: Vec<(i32, i32)> = vec![(1, 2), (3, 4)];
     s.push_str(&format!("{:?} ", pairs));
-    s.push_str(&format!("{:?} ", pairs.iter().map(|(a, b)| a + b).collect::<Vec<_>>()));
+    s.push_str(&format!(
+        "{:?} ",
+        pairs.iter().map(|(a, b)| a + b).collect::<Vec<_>>()
+    ));
     // Box
     let bx = Box::new(vec![1, 2, 3]);
     s.push_str(&format!("{:?} ", bx.as_ref()));

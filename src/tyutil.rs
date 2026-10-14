@@ -138,12 +138,10 @@ impl<'tcx> TypeFolder<TyCtxt<'tcx>> for SoftSubstFolder<'tcx> {
 
     fn fold_const(&mut self, c: ty::Const<'tcx>) -> ty::Const<'tcx> {
         match c.kind() {
-            ty::ConstKind::Param(p) => {
-                match self.args.get(p.index as usize).map(|a| a.kind()) {
-                    Some(ty::GenericArgKind::Const(sub)) => sub,
-                    _ => c,
-                }
-            }
+            ty::ConstKind::Param(p) => match self.args.get(p.index as usize).map(|a| a.kind()) {
+                Some(ty::GenericArgKind::Const(sub)) => sub,
+                _ => c,
+            },
             _ => c.super_fold_with(self),
         }
     }
@@ -200,11 +198,7 @@ pub fn peel_eq_self<'tcx>(tcx: TyCtxt<'tcx>, mut ty: Ty<'tcx>) -> Ty<'tcx> {
 /// Substitute `instance.args` into `ty`, then normalize associated types.
 /// Never panics: unsubstitutable params are left as-is, and normalization
 /// failure falls back to the substituted (or raw) type.
-pub fn subst_ty<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    args: ty::GenericArgsRef<'tcx>,
-    ty: Ty<'tcx>,
-) -> Ty<'tcx> {
+pub fn subst_ty<'tcx>(tcx: TyCtxt<'tcx>, args: ty::GenericArgsRef<'tcx>, ty: Ty<'tcx>) -> Ty<'tcx> {
     // Synthetic impl-trait params display as `impl Into<T>` / `impl From<T>`
     // and carry an internal impl-trait-subst that cannot be instantiated in
     // isolation. For *string-like* targets the boundary convention passes
@@ -497,9 +491,7 @@ pub fn repr_of<'tcx>(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>) -> Repr {
                 AdtKind::Struct | AdtKind::Union => {
                     let in_std = is_std_item(tcx, def.did());
                     let p = def_path(tcx, def.did());
-                    if in_std
-                        && (p.ends_with("string::String") || p == "String")
-                    {
+                    if in_std && (p.ends_with("string::String") || p == "String") {
                         return Repr::BufStr;
                     }
                     if in_std && (p.ends_with("vec::Vec") || p == "Vec") {
@@ -574,7 +566,10 @@ pub fn is_zst_like<'tcx>(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>) -> bool {
     if repr_of(tcx, ty) == Repr::Unit {
         return true;
     }
-    matches!(ty.kind(), ty::FnDef(..) | ty::Closure(..) | ty::CoroutineClosure(..))
+    matches!(
+        ty.kind(),
+        ty::FnDef(..) | ty::Closure(..) | ty::CoroutineClosure(..)
+    )
 }
 
 /// Field type of an ADT field (substituted with the ADT's own args).
@@ -588,7 +583,10 @@ pub fn adt_field_ty<'tcx>(
         ty::Adt(def, args) => (*def, *args),
         _ => return None,
     };
-    let f = def.variant(variant_idx).fields.get(FieldIdx::from_usize(field_idx))?;
+    let f = def
+        .variant(variant_idx)
+        .fields
+        .get(FieldIdx::from_usize(field_idx))?;
     Some(subst_unchecked(tcx, args, tcx.type_of(f.did).skip_binder()))
 }
 
@@ -601,11 +599,7 @@ pub fn tuple_field_ty<'tcx>(ty: Ty<'tcx>, idx: usize) -> Option<Ty<'tcx>> {
 }
 
 /// Upvar type of a closure (args already belong to the closure instance).
-pub fn closure_upvar_ty<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    ty: Ty<'tcx>,
-    idx: usize,
-) -> Option<Ty<'tcx>> {
+pub fn closure_upvar_ty<'tcx>(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>, idx: usize) -> Option<Ty<'tcx>> {
     let _ = tcx;
     match ty.kind() {
         ty::Closure(_did, args) => args.as_closure().upvar_tys().get(idx).copied(),
@@ -630,10 +624,7 @@ pub fn discriminant_value<'tcx>(
 }
 
 /// All (variant_idx, discriminant value) pairs for an enum type.
-pub fn all_discriminants<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    ty: Ty<'tcx>,
-) -> Option<Vec<(VariantIdx, u128)>> {
+pub fn all_discriminants<'tcx>(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>) -> Option<Vec<(VariantIdx, u128)>> {
     let (def, _) = match ty.kind() {
         ty::Adt(def, args) if def.is_enum() => (*def, args),
         _ => return None,

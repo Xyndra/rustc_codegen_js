@@ -107,8 +107,14 @@ fn successors(body: &Body<'_>, b: usize) -> Vec<usize> {
             }
             TerminatorKind::Drop { target, .. }
             | TerminatorKind::Assert { target, .. }
-            | TerminatorKind::FalseEdge { real_target: target, .. }
-            | TerminatorKind::FalseUnwind { real_target: target, .. } => out.push(target.index()),
+            | TerminatorKind::FalseEdge {
+                real_target: target,
+                ..
+            }
+            | TerminatorKind::FalseUnwind {
+                real_target: target,
+                ..
+            } => out.push(target.index()),
             _ => {}
         }
     }
@@ -225,7 +231,10 @@ fn post_dominators(succs: &[Vec<usize>], exit: usize) -> Option<Vec<usize>> {
         if passes > n + 2 {
             // No convergence: give up (caller falls back) instead of hanging.
             if timing {
-                eprintln!("[js-timing] postdoms NO-CONVERGE passes={passes} elapsed={}", ms(&t0));
+                eprintln!(
+                    "[js-timing] postdoms NO-CONVERGE passes={passes} elapsed={}",
+                    ms(&t0)
+                );
             }
             return None;
         }
@@ -253,7 +262,10 @@ fn post_dominators(succs: &[Vec<usize>], exit: usize) -> Option<Vec<usize>> {
         }
     }
     if timing {
-        eprintln!("[js-timing] postdoms DONE passes={passes} elapsed={}", ms(&t0));
+        eprintln!(
+            "[js-timing] postdoms DONE passes={passes} elapsed={}",
+            ms(&t0)
+        );
     }
     Some(idom.into_iter().take(n).collect())
 }
@@ -308,7 +320,10 @@ impl Structure {
         }
         if timing {
             let reach = po_num.iter().filter(|&&p| p != NONE).count();
-            eprintln!("[js-timing] analyze postorder DONE reachable={reach}/{n} elapsed={}", ms(&t_all));
+            eprintln!(
+                "[js-timing] analyze postorder DONE reachable={reach}/{n} elapsed={}",
+                ms(&t_all)
+            );
         }
         // --- dominators over the reachable graph ---
         let mut succs = vec![vec![]; n];
@@ -331,7 +346,10 @@ impl Structure {
             if passes > n + 2 {
                 // No convergence: fall back instead of hanging.
                 if timing {
-                    eprintln!("[js-timing] analyze dominators NO-CONVERGE passes={passes} elapsed={}", ms(&t_dom));
+                    eprintln!(
+                        "[js-timing] analyze dominators NO-CONVERGE passes={passes} elapsed={}",
+                        ms(&t_dom)
+                    );
                 }
                 return None;
             }
@@ -362,7 +380,11 @@ impl Structure {
             eprintln!("structure: dominators done, idom={:?}", idom);
         }
         if timing {
-            eprintln!("[js-timing] analyze dominators DONE passes={passes} elapsed={} total={}", ms(&t_dom), ms(&t_all));
+            eprintln!(
+                "[js-timing] analyze dominators DONE passes={passes} elapsed={} total={}",
+                ms(&t_dom),
+                ms(&t_all)
+            );
         }
         // --- natural loops: back edge u -> h means h dominates u ---
         let mut bodies: HashMap<usize, HashSet<usize>> = HashMap::new();
@@ -397,7 +419,11 @@ impl Structure {
             }
         }
         if timing {
-            eprintln!("[js-timing] analyze loops DONE headers={} elapsed={}", is_header.iter().filter(|&&h| h).count(), ms(&t_all));
+            eprintln!(
+                "[js-timing] analyze loops DONE headers={} elapsed={}",
+                is_header.iter().filter(|&&h| h).count(),
+                ms(&t_all)
+            );
         }
         if std::env::var("JS_STRUCT_DEBUG").is_ok() && n <= 10 {
             eprintln!("PDOM body n={n} succs={succs:?}");
@@ -409,7 +435,10 @@ impl Structure {
         // immediate post-dominator of a branch block is its join.
         let Some(ipdom) = post_dominators(&succs, n) else {
             if timing {
-                eprintln!("[js-timing] analyze ABORT postdoms-failed elapsed={}", ms(&t_all));
+                eprintln!(
+                    "[js-timing] analyze ABORT postdoms-failed elapsed={}",
+                    ms(&t_all)
+                );
             }
             return None;
         };
@@ -469,13 +498,18 @@ impl Structure {
             }
             if outs.len() > 1 {
                 if dbg {
-                    eprintln!("LOOP-ENTRY bb={bb} multi-exit outs={outs:?} body_len={}", loop_body.len());
+                    eprintln!(
+                        "LOOP-ENTRY bb={bb} multi-exit outs={outs:?} body_len={}",
+                        loop_body.len()
+                    );
                 }
                 return None;
             }
             exit = outs.first().copied().unwrap_or(NONE);
         }
-        let term = body.basic_blocks[BasicBlock::from_usize(bb)].terminator.as_ref()?;
+        let term = body.basic_blocks[BasicBlock::from_usize(bb)]
+            .terminator
+            .as_ref()?;
         if dbg {
             let tname = match &term.kind {
                 TerminatorKind::Goto { .. } => "Goto",
@@ -496,10 +530,19 @@ impl Structure {
             // the decision branch, whose back edge becomes `continue` and
             // whose exit becomes `break`.
             TerminatorKind::Drop { target, .. }
-            | TerminatorKind::Call { target: Some(target), .. }
+            | TerminatorKind::Call {
+                target: Some(target),
+                ..
+            }
             | TerminatorKind::Assert { target, .. }
-            | TerminatorKind::FalseEdge { real_target: target, .. }
-            | TerminatorKind::FalseUnwind { real_target: target, .. } => {
+            | TerminatorKind::FalseEdge {
+                real_target: target,
+                ..
+            }
+            | TerminatorKind::FalseUnwind {
+                real_target: target,
+                ..
+            } => {
                 let t = target.index();
                 if !self.in_body(bb, t) {
                     if dbg {
@@ -567,7 +610,11 @@ pub fn plan(body: &Body<'_>, st: &Structure, budget: usize) -> Option<Vec<Node>>
     let reason: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
     let res = plan_inner(body, st, budget, &reason);
     if timing {
-        eprintln!("[js-timing] plan DONE ok={} elapsed={}", res.is_some(), ms(&t_plan));
+        eprintln!(
+            "[js-timing] plan DONE ok={} elapsed={}",
+            res.is_some(),
+            ms(&t_plan)
+        );
     }
     if let Some(r) = reason.lock().unwrap().take() {
         if std::env::var("JS_STRUCT_DEBUG").is_ok() {
@@ -596,7 +643,9 @@ pub fn plan_inner(
     // Exit block per enclosing loop (parallel to `loops`): after `L` comes
     // its exit's code, so `break L` lands exactly there.
     let mut exits: Vec<usize> = vec![];
-    planner.seq(&mut out, 0, NONE, &mut loops, &mut exits).ok()?;
+    planner
+        .seq(&mut out, 0, NONE, &mut loops, &mut exits)
+        .ok()?;
     Some(out)
 }
 
@@ -696,7 +745,10 @@ impl<'w> Planner<'w, '_, '_> {
                     let join = match self.st.join_of(bb) {
                         Some(j) => j,
                         None => {
-                            self.bail(&format!("no join for block {bb} in {}", self.path_trace(bb)))?;
+                            self.bail(&format!(
+                                "no join for block {bb} in {}",
+                                self.path_trace(bb)
+                            ))?;
                             return Err(());
                         }
                     };
@@ -723,8 +775,7 @@ impl<'w> Planner<'w, '_, '_> {
                     // lands at the start of that exit's code).
                     if join != VIRTUAL_EXIT && self.st.exit_depth(join, loops) != 0 {
                         let d = self.st.exit_depth(join, loops);
-                        let at_loop_exit =
-                            exits.get(loops.len() - d).is_some_and(|&e| e == join);
+                        let at_loop_exit = exits.get(loops.len() - d).is_some_and(|&e| e == join);
                         if !(join == stop || loops.contains(&join) || at_loop_exit) {
                             self.bail("a join is outside the enclosing loop")?;
                             return Err(());
@@ -737,8 +788,18 @@ impl<'w> Planner<'w, '_, '_> {
                         arms.push((v, nodes));
                     }
                     let mut otherwise = vec![];
-                    self.seq(&mut otherwise, targets.otherwise().index(), join, loops, exits)?;
-                    out.push(Node::Branch { bb, arms, otherwise });
+                    self.seq(
+                        &mut otherwise,
+                        targets.otherwise().index(),
+                        join,
+                        loops,
+                        exits,
+                    )?;
+                    out.push(Node::Branch {
+                        bb,
+                        arms,
+                        otherwise,
+                    });
                     if join == VIRTUAL_EXIT {
                         out.push(Node::Stop);
                         return Ok(());
@@ -749,10 +810,19 @@ impl<'w> Planner<'w, '_, '_> {
                     }
                 }
                 TerminatorKind::Drop { target, .. }
-                | TerminatorKind::Call { target: Some(target), .. }
+                | TerminatorKind::Call {
+                    target: Some(target),
+                    ..
+                }
                 | TerminatorKind::Assert { target, .. }
-                | TerminatorKind::FalseEdge { real_target: target, .. }
-                | TerminatorKind::FalseUnwind { real_target: target, .. } => {
+                | TerminatorKind::FalseEdge {
+                    real_target: target,
+                    ..
+                }
+                | TerminatorKind::FalseUnwind {
+                    real_target: target,
+                    ..
+                } => {
                     out.push(Node::Block(bb));
                     bb = self.next_ok(out, target.index(), stop, loops)?;
                     if bb == NONE {
@@ -786,7 +856,11 @@ impl<'w> Planner<'w, '_, '_> {
         let mut v: Vec<usize> = self.seen.iter().copied().collect();
         v.sort_unstable();
         v.push(bb);
-        v.iter().take(12).map(|b| b.to_string()).collect::<Vec<_>>().join(",")
+        v.iter()
+            .take(12)
+            .map(|b| b.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
     }
 
     /// Record why planning bailed out (for `JS_STRUCT_DEBUG`).
@@ -815,7 +889,10 @@ impl<'w> Planner<'w, '_, '_> {
             return Ok(NONE);
         }
         // A back edge to any enclosing loop.
-        if let Some(pos) = loops.iter().rposition(|h| self.st.is_header[next] && *h == next) {
+        if let Some(pos) = loops
+            .iter()
+            .rposition(|h| self.st.is_header[next] && *h == next)
+        {
             out.push(Node::Jump {
                 depth: loops.len() - pos,
                 is_break: false,
@@ -825,7 +902,10 @@ impl<'w> Planner<'w, '_, '_> {
         // Leaving the loops we are in.
         let d = self.st.exit_depth(next, loops);
         if d != 0 {
-            out.push(Node::Jump { depth: d, is_break: true });
+            out.push(Node::Jump {
+                depth: d,
+                is_break: true,
+            });
             return Ok(NONE);
         }
         Ok(next)

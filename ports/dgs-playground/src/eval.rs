@@ -5,9 +5,18 @@ use dgs::{
 
 #[derive(Debug, Clone)]
 enum Ast {
-    Call { name: String, args: Vec<Arg> },
-    Method { obj: Box<Ast>, name: String, args: Vec<Arg> },
-    Tuple { items: Vec<Ast> },
+    Call {
+        name: String,
+        args: Vec<Arg>,
+    },
+    Method {
+        obj: Box<Ast>,
+        name: String,
+        args: Vec<Arg>,
+    },
+    Tuple {
+        items: Vec<Ast>,
+    },
     Ident(String),
     Lit(Lit),
 }
@@ -604,7 +613,9 @@ struct Context {
 impl Context {
     fn new() -> Self {
         Context {
-            scene: Some(Scene::new(Viewport::new(-5.0, -5.0, 5.0, 5.0, 800.0, 600.0))),
+            scene: Some(Scene::new(Viewport::new(
+                -5.0, -5.0, 5.0, 5.0, 800.0, 600.0,
+            ))),
         }
     }
 }

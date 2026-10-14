@@ -161,8 +161,8 @@ fn main() {
     }
 
     // ---- 3. run the JS ----
-    let driver = exists(&manifest.join("run.js"))
-        .unwrap_or_else(|| out.join(format!("{name}_driver.js")));
+    let driver =
+        exists(&manifest.join("run.js")).unwrap_or_else(|| out.join(format!("{name}_driver.js")));
     if !manifest.join("run.js").exists() {
         fs::write(&driver, DEFAULT_DRIVER).expect("write driver");
     }
@@ -191,7 +191,10 @@ fn main() {
             art.join(format!("{name}.d.ts")).display()
         );
     } else {
-        print_diff(&String::from_utf8_lossy(&nat), &String::from_utf8_lossy(&js));
+        print_diff(
+            &String::from_utf8_lossy(&nat),
+            &String::from_utf8_lossy(&js),
+        );
         panic!(
             "{name}: MISMATCH\n  native: {}\n  js:     {}",
             native_out.display(),
@@ -259,7 +262,10 @@ fn find_backend(manifest: &Path) -> PathBuf {
             anc.display()
         );
     }
-    panic!("cannot locate the backend crate from {}", manifest.display());
+    panic!(
+        "cannot locate the backend crate from {}",
+        manifest.display()
+    );
 }
 
 /// Run a command, streaming its stderr into `stderr_file`. Returns `None`
@@ -281,7 +287,14 @@ fn run(cmd: &mut Command, stderr_file: Option<&Path>) -> Option<()> {
 /// Print the last `n` lines of a file.
 fn tail(path: &Path, n: usize) {
     if let Ok(s) = fs::read_to_string(path) {
-        for line in s.lines().rev().take(n).collect::<Vec<_>>().into_iter().rev() {
+        for line in s
+            .lines()
+            .rev()
+            .take(n)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+        {
             eprintln!("  {line}");
         }
     }

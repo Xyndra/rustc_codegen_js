@@ -1,4 +1,4 @@
-use dgs::{point, circle, line, polygon, color};
+use dgs::{circle, color, line, point, polygon};
 
 fn main() {
     let mut scene = dgs::Scene::new(dgs::Viewport::new(-5.0, -5.0, 5.0, 5.0, 800.0, 600.0));

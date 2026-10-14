@@ -50,7 +50,11 @@ pub fn run() -> String {
 }
 
 fn fib(n: u32) -> u32 {
-    if n < 2 { n } else { fib(n - 1) + fib(n - 2) }
+    if n < 2 {
+        n
+    } else {
+        fib(n - 1) + fib(n - 2)
+    }
 }
 
 #[allow(dead_code)]

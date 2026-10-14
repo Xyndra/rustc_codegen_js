@@ -30,7 +30,9 @@ pub fn is_long(s: String) -> bool {
 #[js::export]
 pub fn run() -> String {
     let now = unsafe { js_now() };
-    unsafe { js_log("hello"); }
+    unsafe {
+        js_log("hello");
+    }
     let g = greet("world");
     let b = is_long(g.clone());
     format!("{g} {} {} {} {}", add(2, 3), now, b, g)

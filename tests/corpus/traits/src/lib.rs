@@ -105,11 +105,11 @@ pub fn run() -> String {
     s.push_str(&format!("{} {} ", area_of(&Sq(3)), area_of(&R(3, 4)))); // 10 13
     s.push_str(&format!("{} ", bigger(Sq(5), R(3, 4)))); // 25
     s.push_str(&format!("{} ", Sq(7).tag())); // Sq7
-    // --- derived Debug (tuple-struct form) ---
+                                              // --- derived Debug (tuple-struct form) ---
     s.push_str(&format!("{:?} {:?} ", Sq(1), R(2, 3))); // Sq(1) R(2, 3)
-    // --- generic + iterator adapters ---
+                                                        // --- generic + iterator adapters ---
     s.push_str(&format!("{} ", sum_squares(1..=4))); // 30
-    // --- closures capturing by reference and by value ---
+                                                     // --- closures capturing by reference and by value ---
     let mut c = Counter::new();
     s.push_str(&format!("{} {} ", c.next(), c.next())); // 0 1
     let mut total = String::new();
@@ -117,7 +117,7 @@ pub fn run() -> String {
     push_one(1);
     push_one(2);
     s.push_str(&format!("{} ", total)); // 12
-    // --- drop ordering / scope exit ---
+                                        // --- drop ordering / scope exit ---
     {
         let _x = vec![1, 2, 3];
         let _y = vec![4, 5];
@@ -125,10 +125,13 @@ pub fn run() -> String {
         s.push_str(&format!("{} ", _x.len() + _y.len())); // 8
     }
     // --- panics through catch_unwind ---
-    s.push_str(&format!("{:?} ", was_unwind(|| {
-        let v: Vec<i32> = Vec::new();
-        v[0]  // bounds-check panic (inline throw)
-    }))); // true
+    s.push_str(&format!(
+        "{:?} ",
+        was_unwind(|| {
+            let v: Vec<i32> = Vec::new();
+            v[0] // bounds-check panic (inline throw)
+        })
+    )); // true
     let r = was_unwind(|| 1 + None::<i32>.unwrap());
     s.push_str(&format!("{} {} ", r, r)); // true true
     let m = was_unwind(|| panic!("boom {}", 42)); // fmt panic
