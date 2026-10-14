@@ -4,6 +4,14 @@ cargo-features = ["profile-rustflags"]
 # to JavaScript. `dgs-site` (normal-)depends on `dgs`/`dgs-playground`, so
 # one command builds everything from a clean target dir:
 #   cargo build-js -p dgs-site
+#
+# NOTE: no `[profile.release]` size tricks on purpose. The shipped artifact
+# is minified JS text, so `lto` (LLVM bitcode at native link time),
+# `codegen-units` (LLVM partitioning; the backend always returns empty
+# module sets) and `strip` (native symbols; `.mjs` has none) cannot affect
+# it. `opt-level="z"` was measured: -1.5% pre-minify, byte-identical
+# post-minify (235627 == 235627). Site size is configured in
+# `dgs-site/build.rs` (oxc compression preset) instead.
 [workspace]
 resolver = "2"
 members = ["dgs-playground", "dgs-quicktest", "dgs-site"]
