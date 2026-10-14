@@ -41,14 +41,10 @@ jobs:
             . -> target
             ports -> ports/target
 
-      - name: Build backend (release)
-        run: cargo build --release
+      - name: Build backend, prepare config, run tests and site
+        run: cargo run --manifest-path tools/cargo-codegen-js/Cargo.toml -- all
+        env:
+          RUST_LOG: info
 
       - name: Run corpus differential tests
         run: sh tests/diff.sh
-
-      - name: Build playground bundles
-        run: cargo build --manifest-path ports/Cargo.toml -p dgs -p dgs-playground
-
-      - name: Build site
-        run: cargo build --manifest-path ports/Cargo.toml -p dgs-site
