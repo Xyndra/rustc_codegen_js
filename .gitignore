@@ -25,3 +25,6 @@ rustc-ice-*.txt
 
 # User codegen config (secrets / paths)
 codegen-config.toml
+
+# generated codegen backend config
+.cargo/

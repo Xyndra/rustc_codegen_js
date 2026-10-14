@@ -1,7 +1,7 @@
 use std::env;
 use std::fs;
 use std::path::PathBuf;
-use std::process::{Command, ExitStatus};
+use std::process::Command;
 
 fn root() -> PathBuf {
     let mut p = env::current_dir().unwrap();
@@ -9,104 +9,43 @@ fn root() -> PathBuf {
         if p.join("rust-toolchain.toml").exists() && p.join("Cargo.toml").exists() {
             return p;
         }
-        if !p.pop() {
-            break;
-        }
+        if !p.pop() { break; }
     }
     panic!("repository root not found");
 }
 
-fn prepare(root: &PathBuf) -> Result<(), String> {
+fn prepare(root: &PathBuf) {
     let cfg = root.join(".cargo").join("config.toml");
+    let backend = format!("{}/target/release/libcodegen_js.so", root.display());
     let body = format!(
-        r#"cargo-features = ["profile-rustflags"]
-
-[build]
-[unstable]
-codegen-backend = true
-
-[profile.dev.package.dgs]
-codegen-backend = "{root}/target/release/libcodegen_js.so"
-rustflags = ["-Zalways-encode-mir=false"]
-
-[profile.dev.package.dom]
-codegen-backend = "{root}/target/release/libcodegen_js.so"
-rustflags = ["-Zalways-encode-mir=false"]
-
-[profile.dev.package.dgs-browser]
-codegen-backend = "{root}/target/release/libcodegen_js.so"
-rustflags = ["-Zalways-encode-mir=false"]
-
-[profile.dev.package.typst-browser]
-codegen-backend = "{root}/target/release/libcodegen_js.so"
-rustflags = ["-Zalways-encode-mir=false"]
-
-[profile.dev.package.dgs-playground]
-codegen-backend = "{root}/target/release/libcodegen_js.so"
-rustflags = ["-Zalways-encode-mir=false"]
-
-[profile.dev.package.color-test]
-codegen-backend = "{root}/target/release/libcodegen_js.so"
-rustflags = ["-Zalways-encode-mir=false"]
-
-[profile.dev.package.dgs-quicktest]
-codegen-backend = "{root}/target/release/libcodegen_js.so"
-rustflags = ["-Zalways-encode-mir=false"]
-
-[profile.dev.package.dgs-site]
-codegen-backend = "{root}/target/release/libcodegen_js.so"
-rustflags = ["-Zalways-encode-mir=false"]
-"#,
-        root = root.display()
+        "cargo-features = [\"profile-rustflags\"]\n\n[build]\n[unstable]\ncodegen-backend = true\n\n[profile.dev.package.dgs]\ncodegen-backend = \"{b}\"\nrustflags = [\"-Zalways-encode-mir=false\"]\n\n[profile.dev.package.dom]\ncodegen-backend = \"{b}\"\nrustflags = [\"-Zalways-encode-mir=false\"]\n\n[profile.dev.package.dgs-browser]\ncodegen-backend = \"{b}\"\nrustflags = [\"-Zalways-encode-mir=false\"]\n\n[profile.dev.package.typst-browser]\ncodegen-backend = \"{b}\"\nrustflags = [\"-Zalways-encode-mir=false\"]\n\n[profile.dev.package.dgs-playground]\ncodegen-backend = \"{b}\"\nrustflags = [\"-Zalways-encode-mir=false\"]\n\n[profile.dev.package.color-test]\ncodegen-backend = \"{b}\"\nrustflags = [\"-Zalways-encode-mir=false\"]\n\n[profile.dev.package.dgs-quicktest]\ncodegen-backend = \"{b}\"\nrustflags = [\"-Zalways-encode-mir=false\"]\n\n[profile.dev.package.dgs-site]\ncodegen-backend = \"{b}\"\nrustflags = [\"-Zalways-encode-mir=false\"]\n",
+        b = backend
     );
     fs::create_dir_all(root.join(".cargo")).unwrap();
-    fs::write(cfg, body).map_err(|e| e.to_string())?;
-    println!("prepared .cargo/config.toml");
-    Ok(())
+    fs::write(cfg, body).unwrap();
+    println!("prepared generated .cargo/config.toml");
 }
 
-fn run(cmd: &mut Command, root: &PathBuf) -> Result<(), String> {
+fn exec(cmd: &mut Command, root: &PathBuf) {
     println!("running: {:?}", cmd);
     cmd.current_dir(root);
-    let status: ExitStatus = cmd.status().map_err(|e| e.to_string())?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("command failed: {:?}", status))
+    let status = cmd.status().expect("failed to spawn command");
+    if !status.success() {
+        eprintln!("command failed: {}", status);
+        std::process::exit(1);
     }
 }
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
     let root = root();
-    let cmd = args.first().cloned().unwrap_or_else(|| "help".into());
-    match cmd.as_str() {
-        "prepare" => {
-            if let Err(e) = prepare(&root) {
-                eprintln!("{}", e);
-                std::process::exit(1);
-            }
+    match args.first().map(String::as_str) {
+        Some("backend") => {
+            let mut c = Command::new("cargo"); c.args(["build", "--release"]); exec(&mut c, &root);
         }
-        "backend" => {
-            let mut c = Command::new("cargo");
-            c.args(["build", "--release"]);
-            if let Err(e) = run(&mut c, &root) {
-                eprintln!("{}", e);
-                std::process::exit(1);
-            }
-        }
-        "all" | "site" => {
-            // backend
-            let mut c = Command::new("cargo");
-            c.args(["build", "--release"]);
-            if let Err(e) = run(&mut c, &root) {
-                eprintln!("{}", e);
-                std::process::exit(1);
-            }
-            if let Err(e) = prepare(&root) {
-                eprintln!("{}", e);
-                std::process::exit(1);
-            }
+        Some("all") => {
+            let mut c = Command::new("cargo"); c.args(["build", "--release"]); exec(&mut c, &root);
+            prepare(&root);
             let mut c = Command::new("cargo");
             c.args([
                 "build",
@@ -119,17 +58,20 @@ fn main() {
                 "-p",
                 "dgs-site",
             ]);
-            if let Err(e) = run(&mut c, &root) {
-                eprintln!("{}", e);
-                std::process::exit(1);
-            }
+            exec(&mut c, &root);
         }
-        "help" | "-h" | "--help" => {
-            println!("cargo-codegen-js: prepare | backend | site | all");
+        Some("prepare") => prepare(&root),
+        Some("clean") => {
+            let _ = fs::remove_file(root.join(".cargo").join("config.toml"));
         }
-        other => {
-            eprintln!("unknown command: {}", other);
-            std::process::exit(1);
+        Some("help") | Some("-h") | Some("--help") | None => {
+            println!("usage: cargo-codegen-js [prepare|backend|all|clean]");
+        }
+        Some(other) => {
+            // passthrough to cargo with generated config if exists
+            let mut c = Command::new("cargo");
+            c.args(args);
+            exec(&mut c, &root);
         }
     }
 }

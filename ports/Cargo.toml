@@ -1,7 +1,7 @@
+cargo-features = ["profile-rustflags"]
 # Workspace for rustc_codegen_js browser ports.
 # Crates built to JavaScript are selected via per-package codegen-backend
 # profiles (see .cargo/config.toml). Everything else builds natively.
-cargo-features = ["profile-rustflags"]
 [workspace]
 resolver = "2"
 members = ["dom", "dgs-browser", "typst-browser", "dgs-playground", "dgs-quicktest", "color-test", "dgs-site"]
