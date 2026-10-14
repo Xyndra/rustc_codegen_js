@@ -102,7 +102,9 @@ fn main() {
     }
     // The page drives the crate's main entry by its wrapper name, and the
     // crate's imports are true JS calls (no host shims for the page to give).
-    for wrapper in ["function _js_init(", "function _js_run("] {
+    // Only `_js_init` is required: anything else unreferenced (e.g. a stale
+    // `_js_run` wrapper) is dead code the minifier correctly drops.
+    for wrapper in ["function _js_init("] {
         if !combined.contains(wrapper) {
             panic!("dgs-site: dgs_playground.mjs has no `{wrapper}` wrapper for the page to call");
         }
@@ -257,7 +259,14 @@ fn minify_js(text: &str, script: bool, top_level: bool) -> String {
             ..Default::default()
         }),
         mangle_properties: None,
-        compress: Some(CompressOptions::safest()),
+        // Full `smallest()` compression (dead-code elimination, etc.),
+        // not `safest()`: the backend emits plain direct-call JavaScript
+        // with no `eval`, no dynamic dispatch, and no `.name` reads, so
+        // oxc's semantics-preserving transforms apply. Entry points stay
+        // alive via the `_js_init()` call appended below (plus the
+        // `reserved` mangler names); callbacks passed to DOM APIs are
+        // retained by the compressor's unknown-call conservatism.
+        compress: Some(CompressOptions::smallest()),
     };
     let mr = Minifier::new(opts).minify(&allocator, &mut program);
     Codegen::new()

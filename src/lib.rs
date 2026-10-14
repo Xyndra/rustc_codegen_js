@@ -778,6 +778,17 @@ fn mir_hook<'tcx>(tcx: TyCtxt<'tcx>, def: LocalDefId) -> &'tcx Steal<Body<'tcx>>
     } else {
         None
     };
+    // `mir_inliner_callees` borrows `mir_promoted`, so it must be computed
+    // (and memoized) BEFORE `mir_promoted` is stolen below. Otherwise the
+    // release inliner (`mir_callgraph_cyclic`, reached via `optimized_mir`)
+    // borrows the stolen value and ICEs. This mirrors the stock provider,
+    // minus its `should_run_pass` gate, which lives in rustc_mir_transform's
+    // private `pass_manager` module and is purely a compile-time
+    // optimization: computing unconditionally is always sound.
+    if tcx.def_kind(def).is_fn_like() {
+        tcx.ensure_done()
+            .mir_inliner_callees(ty::InstanceKind::Item(def.to_def_id()));
+    }
     tcx.ensure_done().check_liveness(def);
     let (body, _) = tcx.mir_promoted(def);
     let mut body = body.steal();

@@ -45,7 +45,7 @@ jobs:
         run: cargo install --path tools/cargo-build-js
 
       - name: Build backend and ports with codegen backend
-        run: cargo build-js --manifest-path ports/Cargo.toml -p dgs-site
+        run: cargo build-js --manifest-path ports/Cargo.toml -p dgs-site --release
         env:
           RUST_LOG: info
 
@@ -55,7 +55,7 @@ jobs:
         with:
           name: dgs-site-dgs-playground
           path: |
-            ports/target/debug/dgs-playground/
+            ports/target/release/dgs-playground/
           if-no-files-found: warn
 
       - name: Run corpus differential tests
