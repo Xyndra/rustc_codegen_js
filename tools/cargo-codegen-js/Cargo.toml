@@ -1,7 +1,0 @@
-cargo-features = ["profile-rustflags"]
-[package]
-name = "cargo-codegen-js"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]

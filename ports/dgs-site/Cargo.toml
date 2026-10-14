@@ -7,6 +7,8 @@ edition = "2021"
 crate-type = ["rlib"]
 
 [build-dependencies]
+dgs-playground = { version = "0.1.0", path = "../dgs-playground" }
+dgs = { version = "0.1", default-features = false }
 oxc_minifier = "0.154.0"
 oxc_allocator = "0.154.0"
 oxc_parser = "0.154.0"
