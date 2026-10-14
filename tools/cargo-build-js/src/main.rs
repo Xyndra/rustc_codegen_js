@@ -56,6 +56,16 @@ fn main() {
             cargo_args.insert(0, "build".to_string());
         }
     }
+    let has_manifest = cargo_args.iter().any(|a| a == "--manifest-path")
+        || cargo_args.iter().any(|a| a.starts_with("--manifest-path="));
+    if !has_manifest {
+        let candidate = invoked_cwd.join("Cargo.toml");
+        if candidate.exists() {
+            let insert_at = if cargo_args.first().map(String::as_str) == Some("build") { 1 } else { 0 };
+            cargo_args.insert(insert_at, "--manifest-path".to_string());
+            cargo_args.insert(insert_at + 1, candidate.display().to_string());
+        }
+    }
 
     let mut cmd = Command::new("cargo");
     cmd.arg("--config").arg("unstable.codegen-backend=true");
