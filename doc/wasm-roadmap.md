@@ -7,8 +7,8 @@ reached through a shared boundary ABI plus runtime bridges.
 
 ## Current baseline
 
-- Host compiler is a nightly codegen backend (`libcodegen_js.so`) selected
-  via `cargo` `codegen-backend`; see `ports/.cargo/config.toml`.
+-  Host compiler is a nightly codegen backend (`libcodegen_js.so`) selected
+  via `cargo` `codegen-backend`
 - Output is `.mjs` + `.d.ts` bundles plus an inlined runtime; values use JS
   representations (`bool`/small ints as JS number, `i64/i128` as `BigInt`,
   strings as JS strings, ADTs as arrays/`{t,v}`).

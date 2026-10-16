@@ -39,13 +39,13 @@ jobs:
         with:
           workspaces: |
             . -> target
-            ports -> ports/target
+            examples/dgs_web -> examples/dgs_web/target
 
       - name: Install cargo-build-js
         run: cargo install --path tools/cargo-build-js
 
-      - name: Build backend and ports with codegen backend
-        run: cargo build-js --manifest-path ports/Cargo.toml -p dgs-site --release
+      - name: Build backend and examples/dgs_web with codegen backend
+        run: cargo build-js --manifest-path examples/dgs_web/Cargo.toml -p dgs-site --release
         env:
           RUST_LOG: info
 
@@ -53,9 +53,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: dgs-site-dgs-playground
+          name: dgs-playground-site
           path: |
-            ports/target/release/dgs-playground/
+            examples/dgs_web/target/release/dgs-playground/
           if-no-files-found: warn
 
       - name: Run corpus differential tests
