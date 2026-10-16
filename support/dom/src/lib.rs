@@ -1,6 +1,6 @@
 //! Typed DOM API for `rustc_codegen_js`, with `web-sys` naming.
 //!
-//! Handles are transparent newtypes over [`js_support::JsValue`]: wrapping
+//! Handles are transparent newtypes over [`js_util::JsValue`]: wrapping
 //! and `.0` are free, `Clone`/`Copy`/`PartialEq` behave as identity, and
 //! nothing is ever serialized. Every method binds the true JS operation
 //! through a `$N`-template `#[js::import]` — no host shims, no runtime
@@ -23,9 +23,9 @@
 #![register_tool(js)]
 #![allow(dead_code)]
 
-use js_support::JsValue;
+use js_util::JsValue;
 
-pub use js_support::JsValue as Handle;
+pub use js_util::JsValue as Handle;
 
 /// The global `window`.
 #[js::opaque]

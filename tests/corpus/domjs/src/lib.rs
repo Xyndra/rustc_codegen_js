@@ -24,8 +24,8 @@ pub fn run() -> String {
     let mut v = Vec::new();
     v.push(el);
     // Upstream inline stub, called explicitly (no macro involved).
-    let tag: String = js_support::js1("document.getElementById($0).tagName", "stage");
-    let n: i32 = js_support::js0("1 + 2");
+    let tag: String = js_util::js1("document.getElementById($0).tagName", "stage");
+    let n: i32 = js_util::js0("1 + 2");
     let attr: String = el
         .get_attribute("id")
         .expect("missing id")

@@ -6,4 +6,4 @@ description = "Typed DOM API for rustc_codegen_js (web-sys naming, direct refere
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-js_support = { path = "../js_support" }
+js_util = { path = "../js_util" }

@@ -139,7 +139,7 @@ stage.set_inner_html("<b>hi</b>");
 ```
 
 - Handles (`Window`, `Document`, `Element`, ...) are transparent
-  newtypes over `js_support::JsValue`: wrapping and `.0` are free,
+  newtypes over `js_util::JsValue`: wrapping and `.0` are free,
   `Clone`/`Copy`/`PartialEq` behave as identity, and nothing is ever
   serialized. They cross `#[js::import]`/`#[js::export]` as `any` and
   compose inside `Option`/`Vec`/etc.

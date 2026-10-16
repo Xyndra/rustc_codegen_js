@@ -1,5 +1,5 @@
 [package]
-name = "js_support"
+name = "js_util"
 version = "0.1.0"
 edition = "2021"
 description = "JS-interop support for rustc_codegen_js: opaque handles and inline JS"

@@ -403,7 +403,7 @@ pub fn is_box_adt(tcx: TyCtxt<'_>, did: DefId) -> bool {
 
 /// `true` if `did` carries the `#[js::<name>]` tool attribute, whether it is
 /// defined in the local crate (HIR) or upstream (crate metadata, e.g. the
-/// `js_support` crate). The crate defining the item needs
+/// `js_util` crate). The crate defining the item needs
 /// `#![register_tool(js)]`.
 pub fn has_js_attr(tcx: TyCtxt<'_>, did: DefId, name: &str) -> bool {
     let path = [

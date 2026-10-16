@@ -7,4 +7,4 @@ build = "build.rs"
 
 [dependencies]
 dom = { path = "../../../support/dom" }
-js_support = { path = "../../../support/js_support" }
+js_util = { path = "../../../support/js_util" }

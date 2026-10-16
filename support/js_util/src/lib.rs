@@ -11,7 +11,7 @@
 //!   trailing `$N` splices and is never emitted.
 //!
 //! ```rust,ignore
-//! use js_support::{JsValue, js1};
+//! use js_util::{JsValue, js1};
 //!
 //! let el: JsValue = js1("document.getElementById($0)", "stage");
 //! ```
@@ -22,6 +22,7 @@
 //! the return type cannot be inferred, so write
 //! `let _: () = js1("$0.replaceChildren()", el);`.
 
+#![no_std]
 #![feature(register_tool)]
 #![register_tool(js)]
 #![allow(dead_code)]
@@ -36,6 +37,18 @@ pub struct JsValue;
 impl core::fmt::Debug for JsValue {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "JsValue")
+    }
+}
+
+impl JsValue {
+    /// The JS `null` value, for explicit null construction and comparison.
+    pub fn null() -> JsValue {
+        js0("null")
+    }
+
+    /// The JS `undefined` value.
+    pub fn undefined() -> JsValue {
+        js0("undefined")
     }
 }
 

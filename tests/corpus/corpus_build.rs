@@ -102,11 +102,11 @@ fn main() {
     // ---- 1. JS backend ----
     let js_dir = art.join("js");
     recreate(&js_dir);
-    // Corpora using the support crates (`support/js_support`, `support/dom`)
+    // Corpora using the support crates (`support/js_util`, `support/dom`)
     // declare path dependencies in their Cargo.toml, but this harness drives
     // bare `rustc`, so build the rlibs (stock rustc; only metadata is read)
     // and forward them as explicit `--extern`s. `-L` covers transitive
-    // metadata (dom's types name js_support).
+    // metadata (dom's types name js_util).
     let uses_support = fs::read_to_string(manifest.join("Cargo.toml"))
         .map_or(false, |t| t.contains("support/"));
     let sdir = art.join("support");
@@ -126,7 +126,7 @@ fn main() {
                 .arg("--out-dir")
                 .arg(&sdir)
                 .arg("--extern")
-                .arg(format!("js_support={}", sdir.join("libjs_support.rlib").display()))
+                .arg(format!("js_util={}", sdir.join("libjs_util.rlib").display()))
                 .arg("-L")
                 .arg(&sdir)
                 .arg(format!("-Zcodegen-backend={}", backend.display())),
@@ -137,7 +137,7 @@ fn main() {
     // Forward the support rlibs as explicit `--extern`s (built above).
     let mut extra: Vec<String> = Vec::new();
     if uses_support {
-        for krate in ["js_support", "dom"] {
+        for krate in ["js_util", "dom"] {
             extra.push("--extern".to_string());
             extra.push(format!("{krate}={}", sdir.join(format!("lib{krate}.rlib")).display()));
         }
@@ -311,14 +311,14 @@ fn find_backend(manifest: &Path) -> PathBuf {
     );
 }
 
-/// Build the support crates (`js_support`, then `dom`) to rlibs with stock
+/// Build the support crates (`js_util`, then `dom`) to rlibs with stock
 /// rustc and return their directory. Located by walking up to the backend
 /// crate (same routing as `find_backend`); rebuilt only when missing.
 fn build_support_rlibs(manifest: &Path, art: &Path) -> PathBuf {
     let root = find_backend_root(manifest);
     let dir = art.join("support");
     let _ = fs::create_dir_all(&dir);
-    for krate in ["js_support", "dom"] {
+    for krate in ["js_util", "dom"] {
         let rlib = dir.join(format!("lib{krate}.rlib"));
         if rlib.exists() {
             continue;
@@ -331,10 +331,10 @@ fn build_support_rlibs(manifest: &Path, art: &Path) -> PathBuf {
             .arg("--out-dir")
             .arg(&dir);
         if krate == "dom" {
-            // `dom` names `js_support` types: resolve transitively.
+            // `dom` names `js_util` types: resolve transitively.
             cmd.arg("--extern").arg(format!(
-                "js_support={}",
-                dir.join("libjs_support.rlib").display()
+                "js_util={}",
+                dir.join("libjs_util.rlib").display()
             ));
             cmd.arg("-L").arg(&dir);
         }
