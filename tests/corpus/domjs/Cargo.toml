@@ -1,0 +1,10 @@
+[package]
+name = "domjs"
+version = "0.0.0"
+edition = "2021"
+publish = false
+build = "build.rs"
+
+[dependencies]
+dom = { path = "../../../support/dom" }
+js_support = { path = "../../../support/js_support" }

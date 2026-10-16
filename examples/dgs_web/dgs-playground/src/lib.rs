@@ -1,37 +1,34 @@
 #![feature(register_tool)]
 #![register_tool(js)]
-#![allow(dead_code, improper_ctypes)]
+#![allow(dead_code)]
 
 mod eval;
 
-// Document access for the playground page. Every import binds a TRUE JS
-// function via its dotted path — no host shims exist anywhere. All wiring
-// decisions live here: `init()` arms one button per scene with that scene's
-// painter as its click callback, then paints the first scene. The page calls
+use dom::{HtmlTextAreaElement, document};
+
+// Document access for the playground page goes entirely through the `dom`
+// crate (typed handles, web-sys naming) — no `extern` blocks, no imports,
+// no unsafe. `init()` arms one button per scene with that scene's painter
+// as its click callback, then paints the first scene. The page calls
 // `init()` on load and wires nothing itself.
-extern "C" {
-    #[js::import = "document.getElementById(\"stage\").replaceChildren"]
-    fn stage_clear();
-    #[js::import = "document.getElementById(\"stage\").insertAdjacentHTML"]
-    fn stage_show(pos: &str, html: &str);
-    #[js::import = "document.getElementById(\"status\").replaceChildren"]
-    fn status_show(text: &str);
-    #[js::import = "document.getElementById(\"s0\").addEventListener"]
-    fn arm_0(event: &str, cb: fn());
-    #[js::import = "document.getElementById(\"s1\").addEventListener"]
-    fn arm_1(event: &str, cb: fn());
-    #[js::import = "document.getElementById(\"s2\").addEventListener"]
-    fn arm_2(event: &str, cb: fn());
-    #[js::import = "document.getElementById(\"s3\").addEventListener"]
-    fn arm_3(event: &str, cb: fn());
-    #[js::import = "document.getElementById(\"s4\").addEventListener"]
-    fn arm_4(event: &str, cb: fn());
-    #[js::import = "document.getElementById(\"s5\").addEventListener"]
-    fn arm_5(event: &str, cb: fn());
-    #[js::import = "document.getElementById(\"render\").addEventListener"]
-    fn arm_cmd(event: &str, cb: fn());
-    #[js::import = "(() => document.getElementById(\"cmd\").value)"]
-    fn cmd_text() -> String;
+fn stage() -> dom::Element {
+    document()
+        .get_element_by_id("stage")
+        .expect("missing #stage")
+}
+
+fn status() -> dom::Element {
+    document()
+        .get_element_by_id("status")
+        .expect("missing #status")
+}
+
+fn button(id: &str) -> dom::Element {
+    document().get_element_by_id(id).expect("missing button")
+}
+
+fn cmd_text() -> String {
+    HtmlTextAreaElement::from_element(button("cmd")).value()
 }
 
 #[js::export]
@@ -45,13 +42,13 @@ pub fn render(code: &str) -> String {
 /// Page entry point for load: arm every scene button, paint scene 0.
 #[js::export]
 pub fn init() {
-    unsafe { arm_0("click", show_0) };
-    unsafe { arm_1("click", show_1) };
-    unsafe { arm_2("click", show_2) };
-    unsafe { arm_3("click", show_3) };
-    unsafe { arm_4("click", show_4) };
-    unsafe { arm_5("click", show_5) };
-    unsafe { arm_cmd("click", run_cmd) };
+    button("s0").add_event_listener("click", show_0);
+    button("s1").add_event_listener("click", show_1);
+    button("s2").add_event_listener("click", show_2);
+    button("s3").add_event_listener("click", show_3);
+    button("s4").add_event_listener("click", show_4);
+    button("s5").add_event_listener("click", show_5);
+    button("render").add_event_listener("click", run_cmd);
     paint(0);
 }
 
@@ -82,14 +79,17 @@ fn show_5() {
 
 #[js::export]
 pub fn run_from_source() {
-    let code = unsafe { cmd_text() };
+    let code = cmd_text();
     match eval::render(&code) {
         Ok(svg) => {
-            unsafe { stage_clear() };
-            unsafe { stage_show("afterbegin", &svg) };
-            unsafe { status_show("rendered") };
+            let stage = stage();
+            stage.replace_children();
+            stage.insert_adjacent_html("afterbegin", &svg);
+            status().set_text_content("rendered");
         }
-        Err(e) => unsafe { status_show(&format!("Error: {e}")) },
+        Err(e) => {
+            status().set_text_content(&format!("Error: {e}"));
+        }
     }
 }
 
@@ -112,12 +112,13 @@ fn paint(i: usize) {
     let code = scene(i);
     match eval::render(code) {
         Ok(svg) => {
-            unsafe { stage_clear() };
-            unsafe { stage_show("afterbegin", &svg) };
-            unsafe { status_show(&format!("scene {}/6", i + 1)) };
+            let stage = stage();
+            stage.replace_children();
+            stage.insert_adjacent_html("afterbegin", &svg);
+            status().set_text_content(&format!("scene {}/6", i + 1));
         }
         Err(e) => {
-            unsafe { status_show(&format!("scene {}/6: Error: {e}", i + 1)) };
+            status().set_text_content(&format!("scene {}/6: Error: {e}", i + 1));
         }
     }
 }

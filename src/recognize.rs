@@ -493,6 +493,10 @@ pub enum Callee<'tcx> {
     CtorFn,
     /// Call to a `#[js_import]` foreign function.
     JsImport(DefId),
+    /// Call to a `#[js::inline]` stub: peered at the call site, never
+    /// emitted. The first `&str` argument is the JS template (`$N`
+    /// placeholders); the remaining arguments are the splices.
+    JsInline(DefId),
     Panic(PanicKind),
     /// `fmt::Arguments::new` — must be peered, never emitted.
     FmtNew,
@@ -1611,6 +1615,65 @@ pub fn resolve_and_classify<'tcx>(
 ) -> Result<Callee<'tcx>, String> {
     let path = def_path(tcx, did);
     let in_std = crate::tyutil::is_std_item(tcx, did);
+    // Opaque JS handles (`#[js::opaque]`): `Clone` is identity (a live
+    // object reference, not a value to copy) and `PartialEq` is reference
+    // identity (`===`/`!==`). Intercepts derived impls, whose array-shaped
+    // bodies would otherwise miscompile the handle (a unit struct would
+    // clone to `[]` and compare always-equal). `did` may be the trait's
+    // own item (`Clone::clone`, parent is the trait) or an impl item
+    // (`Element::clone`, linked via `trait_item_def_id`).
+    {
+        let trait_did_opt = if let Some(assoc) = tcx.opt_associated_item(did) {
+            if matches!(
+                tcx.def_kind(tcx.parent(did)),
+                rustc_hir::def::DefKind::Trait
+            ) {
+                Some(tcx.parent(did))
+            } else {
+                assoc.trait_item_def_id().map(|t| tcx.parent(t))
+            }
+        } else {
+            None
+        };
+        if let Some(trait_did) = trait_did_opt {
+            let trait_name = tcx
+                .opt_item_name(trait_did)
+                .map(|s| s.as_str().to_string())
+                .unwrap_or_default();
+            let method = tcx
+                .opt_item_name(did)
+                .map(|s| s.as_str().to_string())
+                .unwrap_or_default();
+            let self_ty = args.iter().find_map(|a| match a.kind() {
+                ty::GenericArgKind::Type(t) => {
+                    Some(crate::tyutil::subst_ty(tcx, args, t))
+                }
+                _ => None,
+            });
+            if let Some(st) = self_ty {
+                if crate::tyutil::is_js_value_ty(tcx, st) {
+                    match (trait_name.as_str(), method.as_str()) {
+                        ("Clone", "clone") => return Ok(Callee::Shim(Shim::IntoFn)),
+                        ("PartialEq", "eq") => return Ok(Callee::Shim(Shim::PrimEq)),
+                        ("PartialEq", "ne") => return Ok(Callee::Shim(Shim::PrimNe)),
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    // Inline-JS stubs (`#[js::inline]`): peered at the call site from the
+    // template + splice operands, never resolved or emitted.
+    if crate::tyutil::is_js_inline(tcx, did) {
+        return Ok(Callee::JsInline(did));
+    }
+    // `#[js::import]`-annotated method stubs (e.g. DOM bindings in an
+    // `impl` block): peered exactly like foreign imports, so no body is
+    // needed and none is emitted. Foreign items are covered by the import
+    // map below; this covers the rest.
+    if !tcx.is_foreign_item(did) && crate::tyutil::has_js_attr(tcx, did, "import") {
+        return Ok(Callee::JsImport(did));
+    }
     // `PartialEq::ne` redirect: resolve the sibling `eq` for the same Self
     // and negate. Overriding `ne` inconsistently with `eq` violates the
     // trait contract (clippy::partialeq_ne_impl), so `!eq` is always correct.

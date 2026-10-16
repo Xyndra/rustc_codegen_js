@@ -1,0 +1,6 @@
+[package]
+name = "js_support"
+version = "0.1.0"
+edition = "2021"
+description = "JS-interop support for rustc_codegen_js: opaque handles and inline JS"
+license = "MIT OR Apache-2.0"

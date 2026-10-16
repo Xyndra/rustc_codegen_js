@@ -826,9 +826,14 @@ fn mir_hook<'tcx>(tcx: TyCtxt<'tcx>, def: LocalDefId) -> &'tcx Steal<Body<'tcx>>
 }
 
 /// Boundary value mapping (subset for imports/exports).
-fn boundary_ts(tcx: TyCtxt<'_>, ty: Ty<'_>) -> Result<&'static str, String> {
+fn boundary_ts<'a>(tcx: TyCtxt<'a>, ty: Ty<'a>) -> Result<&'static str, String> {
     if ty.is_unit() {
         return Ok("void");
+    }
+    // Opaque JS handles (and references to them, which are transparent)
+    // cross as untyped JS values.
+    if tyutil::is_js_value_ty(tcx, ty) {
+        return Ok("any");
     }
     match ty.kind() {
         ty::Float(_) => Ok("number"),
@@ -867,42 +872,136 @@ fn has_attr(tcx: TyCtxt<'_>, hir_id: rustc_hir::HirId, name: &str) -> bool {
     has_tool_attr(tcx, hir_id, "js", name)
 }
 
+/// `true` if `did` is a `Clone::clone` / `PartialEq::{eq,ne}` impl method
+/// whose Self type is an opaque JS handle. Calls to such methods are peered
+/// (identity / reference equality), so seeding a body is pure dead weight.
+fn is_peered_opaque_method(tcx: TyCtxt<'_>, did: LocalDefId) -> bool {
+    use rustc_hir::def::DefKind;
+    let did = did.to_def_id();
+    let Some(assoc) = tcx.opt_associated_item(did) else {
+        return false;
+    };
+    // Only impl-block methods qualify (trait declarations have no Self,
+    // inherent methods have no trait).
+    if !matches!(tcx.def_kind(tcx.parent(did)), DefKind::Impl { .. }) {
+        return false;
+    }
+    let Some(trait_item) = assoc.trait_item_def_id() else {
+        return false;
+    };
+    let trait_did = tcx.parent(trait_item);
+    let trait_name = tcx
+        .opt_item_name(trait_did)
+        .map(|s| s.as_str().to_string())
+        .unwrap_or_default();
+    let method = tcx
+        .opt_item_name(did)
+        .map(|s| s.as_str().to_string())
+        .unwrap_or_default();
+    if !matches!(
+        (trait_name.as_str(), method.as_str()),
+        ("Clone", "clone") | ("PartialEq", "eq") | ("PartialEq", "ne")
+    ) {
+        return false;
+    }
+    let self_ty = tcx.type_of(tcx.parent(did)).skip_binder();
+    tyutil::is_js_value_ty(tcx, self_ty)
+}
+
 /// `#[js::import]` argument on an item: `None` = absent, `Some(None)` = bare
 /// (`__js_imports.<name>` indirection), `Some(Some(path))` = direct call to
 /// the true JS function at `<path>` (e.g. `document.getElementById("x")`),
 /// `Some(Err(msg))` = malformed (diagnosed at the use site).
+///
+/// The path may contain `$N` placeholders (`$0`, `$1`, ...) referring to the
+/// function's parameters: `$0.replaceChildren()` calls the method on the
+/// first argument. A path containing `$N` is emitted as a full expression
+/// (no `(args)` appended); otherwise the path is the callee.
 fn import_attr(
     tcx: TyCtxt<'_>,
     hir_id: rustc_hir::HirId,
 ) -> Option<Result<Option<String>, String>> {
-    use rustc_attr_ir::AttrArgs;
     let path = [Symbol::intern("js"), Symbol::intern("import")];
     for a in tcx.hir_attrs(hir_id) {
         if !a.path_matches(&path) {
             continue;
         }
-        match &a.get_normal_item().args {
-            AttrArgs::Empty => return Some(Ok(None)),
-            AttrArgs::Eq { .. } => match a.value_str() {
-                Some(s) => {
-                    let p = s.to_string();
-                    if let Some(e) = validate_import_path(&p) {
-                        return Some(Err(e));
-                    }
-                    return Some(Ok(Some(p)));
-                }
-                None => {
-                    return Some(Err(
-                        "expected #[js::import] or #[js::import = \"<js.path>\"]".to_string(),
-                    ));
-                }
-            },
-            _ => {
-                return Some(Err(
-                    "expected #[js::import] or #[js::import = \"<js.path>\"]".to_string(),
-                ));
-            }
+        if let Some(r) = parse_import_attr(a) {
+            return Some(r);
         }
+    }
+    None
+}
+
+/// Parse one `#[js::import]` attribute: `None` = absent, `Some(None)` =
+/// bare (`__js_imports.<name>` indirection), `Some(Some(path))` = direct
+/// call to the true JS function at `<path>`, `Some(Err(msg))` = malformed
+/// (diagnosed at the use site).
+fn parse_import_attr(a: &rustc_attr_ir::Attribute) -> Option<Result<Option<String>, String>> {
+    use rustc_attr_ir::AttrArgs;
+    match &a.get_normal_item().args {
+        AttrArgs::Empty => Some(Ok(None)),
+        AttrArgs::Eq { .. } => match a.value_str() {
+            Some(s) => {
+                let p = s.to_string();
+                if let Some(e) = validate_import_path(&p) {
+                    return Some(Err(e));
+                }
+                Some(Ok(Some(p)))
+            }
+            None => Some(Err(
+                "expected #[js::import] or #[js::import = \"<js.path>\"]".to_string(),
+            )),
+        },
+        _ => Some(Err(
+            "expected #[js::import] or #[js::import = \"<js.path>\"]".to_string(),
+        )),
+    }
+}
+
+/// The emittable callee for a `#[js::import]`-annotated DefId, read straight
+/// from the attribute (local HIR or upstream metadata). Used when the import
+/// map has no entry — upstream method stubs, whose declaring crate ran in
+/// another process. `None` = absent or malformed (callers diagnose).
+fn import_path_of(tcx: TyCtxt<'_>, did: DefId) -> Option<Result<String, String>> {
+    let path = [Symbol::intern("js"), Symbol::intern("import")];
+    // Local items: HIR attributes.
+    if let Some(local) = did.as_local() {
+        let hir_id = tcx.local_def_id_to_hir_id(local);
+        for a in tcx.hir_attrs(hir_id) {
+            if !a.path_matches(&path) {
+                continue;
+            }
+            return match parse_import_attr(a) {
+                Some(Ok(p)) => {
+                    let js_name = tcx
+                        .opt_item_name(did)
+                        .map(|s| s.to_string())
+                        .unwrap_or_else(|| "import".to_string());
+                    Some(Ok(p.unwrap_or_else(|| format!("__js_imports.{js_name}"))))
+                }
+                Some(Err(e)) => Some(Err(e)),
+                None => None,
+            };
+        }
+        return None;
+    }
+    // Upstream items: encoded attributes.
+    for a in tcx.get_attrs_by_path(did, &path) {
+        let found;
+        // (Bound first so the query temporary drops before use ends.)
+        match parse_import_attr(a) {
+            Some(Ok(p)) => {
+                let js_name = tcx
+                    .opt_item_name(did)
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "import".to_string());
+                found = Some(Ok(p.unwrap_or_else(|| format!("__js_imports.{js_name}"))));
+            }
+            Some(Err(e)) => found = Some(Err(e)),
+            None => continue,
+        }
+        return found;
     }
     None
 }
@@ -1001,6 +1100,13 @@ fn check_boundary_sig(
             ts_inputs.push("function");
             continue;
         }
+        // Imports (and inline splices, which skip this check) accept
+        // `Option` operands, mapped to null-or-value at the call site.
+        // Exports keep rejecting them (no `None` construction from JS).
+        if what == "import" && tyutil::is_option_ty(tcx, t) {
+            ts_inputs.push("any");
+            continue;
+        }
         match boundary_ts(tcx, t) {
             Ok(ts) if ts != "void" => ts_inputs.push(ts),
             Ok(_) => {
@@ -1011,17 +1117,24 @@ fn check_boundary_sig(
             Err(_) => {
                 return Err(format!(
                     "{what} `{name}` has unsupported parameter type {t} \
-                     (allowed: f64, i32, u32, bool, String, &str)"
+                     (allowed: f64, i32, u32, bool, String, &str, #[js::opaque] handles)"
                 ));
             }
         }
     }
     let ts_out = match boundary_ts(tcx, output) {
         Ok(ts) => ts,
+        // Nullable foreign results: `Option<T>` maps null/undefined to
+        // `None` at import/inline return sites (`wrap_js_return`).
+        // `Option` parameters stay rejected (no `None`→null coercion).
+        Err(_) if tyutil::is_option_ty(tcx, output) => "any",
+        // Fallible foreign calls: `Result<T, E>` captures a thrown JS
+        // exception as `Err` at import/inline return sites.
+        Err(_) if tyutil::is_result_ty(tcx, output) => "any",
         Err(_) => {
             return Err(format!(
                 "{what} `{name}` has unsupported return type {output} \
-                 (allowed: f64, i32, u32, bool, String, &str, ())"
+                 (allowed: f64, i32, u32, bool, String, &str, (), Option<T>, Result<T, E>, #[js::opaque] handles)"
             ));
         }
     };
@@ -1136,6 +1249,18 @@ fn codegen_js<'tcx>(tcx: TyCtxt<'tcx>, crate_name: &str) -> Result<(), String> {
         if has_attr(tcx, tcx.local_def_id_to_hir_id(did), "export") {
             continue;
         }
+        // Inline-JS stubs (`#[js::inline]`) are peered at every call site
+        // and never emitted; seeding them would only add dead panic bodies.
+        if has_attr(tcx, tcx.local_def_id_to_hir_id(did), "inline") {
+            continue;
+        }
+        // `#[js::import]`-annotated functions (foreign declarations live
+        // outside this loop; these are method/free-function stubs) are
+        // peered at every call site; seeding them would only add dead
+        // bodies.
+        if import_attr(tcx, tcx.local_def_id_to_hir_id(did)).is_some() {
+            continue;
+        }
         if matches!(tcx.def_kind(did), DefKind::Fn) {
             if let rustc_hir::Node::Item(item) = tcx.hir_node(tcx.local_def_id_to_hir_id(did)) {
                 if let ItemKind::Fn { sig, .. } = item.kind {
@@ -1207,6 +1332,12 @@ fn codegen_js<'tcx>(tcx: TyCtxt<'tcx>, crate_name: &str) -> Result<(), String> {
                 {
                     continue;
                 }
+            }
+            // Skip `Clone`/`PartialEq` impl methods on opaque JS handles:
+            // calls to them are peered (identity / `===`), so no body is
+            // ever needed.
+            if is_peered_opaque_method(tcx, did) {
+                continue;
             }
             // Inherent method: identity args include the implicit Self, which
             // is required for the item; `mono` would ICE on it. Named by the
@@ -1288,6 +1419,43 @@ fn codegen_js<'tcx>(tcx: TyCtxt<'tcx>, crate_name: &str) -> Result<(), String> {
         } else {
             // The map holds the emittable callee: the true path when given,
             // otherwise the shared-imports indirection.
+            let callee = path.unwrap_or_else(|| format!("__js_imports.{js_name}"));
+            g_import_names().lock().unwrap().insert(did, callee);
+        }
+    }
+    // ---- imports on inherent methods (`impl Foo { #[js::import = "$0.bar"]
+    // ---- fn ... }`, e.g. DOM bindings): peered exactly like foreign
+    // ---- imports, so no body is needed or emitted. Trait declarations
+    // ---- qualify too (calls peer; no body is read).
+    for did in tcx.hir_crate_items(()).definitions() {
+        use rustc_hir::def::DefKind;
+        if !matches!(tcx.def_kind(did), DefKind::AssocFn) {
+            continue;
+        }
+        if tcx.is_foreign_item(did.to_def_id()) {
+            continue;
+        }
+        let hir_id = tcx.local_def_id_to_hir_id(did);
+        let attr = match import_attr(tcx, hir_id) {
+            Some(a) => a,
+            None => continue,
+        };
+        let span = tcx.def_span(did);
+        let path = match attr {
+            Err(e) => {
+                tcx.dcx().span_err(span, e);
+                continue;
+            }
+            Ok(p) => p,
+        };
+        let did: DefId = did.to_def_id();
+        let js_name = tcx
+            .opt_item_name(did)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "import".to_string());
+        if let Err(e) = check_boundary_sig(tcx, did, "import", &js_name) {
+            tcx.dcx().span_err(span, e);
+        } else {
             let callee = path.unwrap_or_else(|| format!("__js_imports.{js_name}"));
             g_import_names().lock().unwrap().insert(did, callee);
         }

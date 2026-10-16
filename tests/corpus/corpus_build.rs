@@ -102,6 +102,48 @@ fn main() {
     // ---- 1. JS backend ----
     let js_dir = art.join("js");
     recreate(&js_dir);
+    // Corpora using the support crates (`support/js_support`, `support/dom`)
+    // declare path dependencies in their Cargo.toml, but this harness drives
+    // bare `rustc`, so build the rlibs (stock rustc; only metadata is read)
+    // and forward them as explicit `--extern`s. `-L` covers transitive
+    // metadata (dom's types name js_support).
+    let uses_support = fs::read_to_string(manifest.join("Cargo.toml"))
+        .map_or(false, |t| t.contains("support/"));
+    let sdir = art.join("support");
+    if uses_support {
+        build_support_rlibs(&manifest, &art);
+        // Corpora on the support crates also need the `dom` *bundle* at
+        // node time (real functions like `document()` live there; only
+        // stubs peer). It lands at `<art>/support/dom.mjs`, which `run.js`
+        // addresses relative to `argv[2]` (`../support/dom.mjs`).
+        let _ = fs::create_dir_all(&sdir);
+        run(
+            Command::new("rustc")
+                .arg("--crate-name")
+                .arg("dom")
+                .args(["--crate-type", "rlib", "--edition", "2021"])
+                .arg(find_backend_root(&manifest).join("support/dom/src/lib.rs"))
+                .arg("--out-dir")
+                .arg(&sdir)
+                .arg("--extern")
+                .arg(format!("js_support={}", sdir.join("libjs_support.rlib").display()))
+                .arg("-L")
+                .arg(&sdir)
+                .arg(format!("-Zcodegen-backend={}", backend.display())),
+            Some(&art.join("support_js.err")),
+        )
+        .unwrap_or_else(|| panic!("{name}: the JS backend could not compile dom"));
+    }
+    // Forward the support rlibs as explicit `--extern`s (built above).
+    let mut extra: Vec<String> = Vec::new();
+    if uses_support {
+        for krate in ["js_support", "dom"] {
+            extra.push("--extern".to_string());
+            extra.push(format!("{krate}={}", sdir.join(format!("lib{krate}.rlib")).display()));
+        }
+        extra.push("-L".to_string());
+        extra.push(sdir.display().to_string());
+    }
     t.tick("rustc (JS backend)");
     run(
         Command::new("rustc")
@@ -111,6 +153,7 @@ fn main() {
             .arg(&src)
             .arg("--out-dir")
             .arg(&js_dir)
+            .args(&extra)
             .arg(format!("-Zcodegen-backend={}", backend.display())),
         Some(&art.join("js.err")),
     )
@@ -261,6 +304,55 @@ fn find_backend(manifest: &Path) -> PathBuf {
             "backend {BACKEND_SO} is not built in {}; run `cargo build` there first",
             anc.display()
         );
+    }
+    panic!(
+        "cannot locate the backend crate from {}",
+        manifest.display()
+    );
+}
+
+/// Build the support crates (`js_support`, then `dom`) to rlibs with stock
+/// rustc and return their directory. Located by walking up to the backend
+/// crate (same routing as `find_backend`); rebuilt only when missing.
+fn build_support_rlibs(manifest: &Path, art: &Path) -> PathBuf {
+    let root = find_backend_root(manifest);
+    let dir = art.join("support");
+    let _ = fs::create_dir_all(&dir);
+    for krate in ["js_support", "dom"] {
+        let rlib = dir.join(format!("lib{krate}.rlib"));
+        if rlib.exists() {
+            continue;
+        }
+        let mut cmd = Command::new("rustc");
+        cmd.arg("--crate-name")
+            .arg(krate)
+            .args(["--crate-type", "rlib", "--edition", "2021"])
+            .arg(root.join(format!("support/{krate}/src/lib.rs")))
+            .arg("--out-dir")
+            .arg(&dir);
+        if krate == "dom" {
+            // `dom` names `js_support` types: resolve transitively.
+            cmd.arg("--extern").arg(format!(
+                "js_support={}",
+                dir.join("libjs_support.rlib").display()
+            ));
+            cmd.arg("-L").arg(&dir);
+        }
+        run(&mut cmd, Some(&art.join("support.err")))
+            .unwrap_or_else(|| panic!("cannot build the {krate} crate"));
+    }
+    dir
+}
+
+/// The backend crate root (whose Cargo.toml mentions `rustc_codegen_js`).
+fn find_backend_root(manifest: &Path) -> PathBuf {
+    for anc in manifest.ancestors() {
+        let Ok(text) = fs::read_to_string(anc.join("Cargo.toml")) else {
+            continue;
+        };
+        if text.contains("rustc_codegen_js") {
+            return anc.to_path_buf();
+        }
     }
     panic!(
         "cannot locate the backend crate from {}",

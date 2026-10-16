@@ -11,5 +11,5 @@ name = "codegen_js"
 crate-type = ["dylib"]
 
 [workspace]
-members = ["tools/cargo-build-js"]
+members = ["tools/cargo-build-js", "support/js_support", "support/dom"]
 resolver = "2"

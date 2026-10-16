@@ -1,0 +1,9 @@
+[package]
+name = "dom"
+version = "0.1.0"
+edition = "2021"
+description = "Typed DOM API for rustc_codegen_js (web-sys naming, direct references)"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+js_support = { path = "../js_support" }

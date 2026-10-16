@@ -76,9 +76,33 @@ fn extracted_backend_path() -> PathBuf {
     };
     let dir = env::temp_dir().join("rustc_codegen_js");
     let _ = fs::create_dir_all(&dir);
-    let path = dir.join(format!("rustc_codegen_js_backend.{}", ext));
-    if !path.exists() || fs::metadata(&path).ok().map(|m| m.len()) != Some(BACKEND.len() as u64) {
+    // FNV-1a over the embedded bytes: any backend change re-extracts. The
+    // old bare length check missed same-size rebuilds and pinned stale
+    // codegen across reinstalls.
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in BACKEND {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    let path = dir.join(format!("rustc_codegen_js_backend_{h:016x}.{ext}"));
+    if !path.exists() {
         let _ = fs::write(&path, BACKEND);
+        // Drop superseded extractions so the temp dir does not grow one
+        // multi-MB backend per toolchain build.
+        if let Ok(rd) = fs::read_dir(&dir) {
+            for ent in rd.flatten() {
+                let p = ent.path();
+                if p != path
+                    && p.file_name()
+                        .and_then(|n| n.to_str())
+                        .map_or(false, |n| {
+                            n.starts_with("rustc_codegen_js_backend_")
+                        })
+                {
+                    let _ = fs::remove_file(&p);
+                }
+            }
+        }
     }
     path
 }

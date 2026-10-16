@@ -471,6 +471,16 @@ enum CallTarget<'tcx> {
         /// JS path from `#[js::import = "<path>"]`.
         name: String,
         args: ty::GenericArgsRef<'tcx>,
+        /// `true` when `name` is an explicit user path containing `$N`
+        /// splice placeholders (emitted as a full expression, no `(args)`
+        /// appended). Internal `__js_imports.*` names are never templates,
+        /// even though they contain `$`-defindex suffixes.
+        template: bool,
+    },
+    /// Peered inline JS (`#[js::inline]` stub): emitted from the call-site
+    /// template + splice operands, never via a named function.
+    JsInline {
+        did: DefId,
     },
     Panic(PanicKind),
     FmtNew,
@@ -666,6 +676,32 @@ impl<'tcx> Emitter<'tcx> {
                 }
                 mir::ProjectionElem::Field(idx, _) => {
                     let i = idx.as_usize();
+                    // Transparent single-field handle wrappers project
+                    // through `.0` as the identity. Any other opaque handle
+                    // has no Rust-visible fields.
+                    if let ty::Adt(def, args) = ty.kind() {
+                        if tyutil::handle_field_ty(self.tcx, def, args).is_some() {
+                            if i != 0 {
+                                self.err(format!("bad field {i} of handle wrapper {ty}"));
+                                return Err(());
+                            }
+                            let f = &def.non_enum_variant().fields[FieldIdx::from_usize(0)];
+                            ty = self.subst(tyutil::subst_unchecked(
+                                self.tcx,
+                                args,
+                                self.tcx.type_of(f.did).skip_binder(),
+                            ));
+                            downcast = None;
+                            continue;
+                        }
+                        if tyutil::is_js_opaque(self.tcx, def.did()) {
+                            self.err(format!(
+                                "cannot access field {i} of opaque JS handle {ty} \
+                                 (use #[js::import]/#[js::inline] to manipulate it in JS)"
+                            ));
+                            return Err(());
+                        }
+                    }
                     let is_enum = matches!(ty.kind(), ty::Adt(d, _) if d.is_enum());
                     if downcast.is_some() || is_enum {
                         let v = downcast.unwrap_or(VariantIdx::from_usize(0));
@@ -912,7 +948,29 @@ impl<'tcx> Emitter<'tcx> {
                 Err(())
             }
             Ok(Callee::JsImport(did)) => {
-                Ok(crate::get_import_name(&did).unwrap_or_else(|| "undefined".to_string()))
+                let name = match crate::get_import_name(&did) {
+                    Some(n) => n,
+                    None => match crate::import_path_of(self.tcx, did) {
+                        Some(Ok(n)) => n,
+                        _ => {
+                            self.err(format!(
+                                "could not resolve import `{}`",
+                                self.tcx.def_path_str(did)
+                            ));
+                            return Err(());
+                        }
+                    },
+                };
+                // Splice templates are call shapes, not values.
+                if is_splice_template(&name) {
+                    self.err("template import cannot be used as a value (call it)".to_string());
+                    return Err(());
+                }
+                Ok(name)
+            }
+            Ok(Callee::JsInline(_)) => {
+                self.err("inline-JS stub cannot be used as a value (call it)".to_string());
+                Err(())
             }
             Ok(Callee::Not(_)) => {
                 self.err("`!=` cannot be used as a function value".to_string());
@@ -1599,6 +1657,30 @@ impl<'tcx> Emitter<'tcx> {
                 Ok(format!("[{}]", out.join(",")))
             }
             AggregateKind::Adt(did, variant, args, _, _) => {
+                // Transparent single-field handle wrappers build as their
+                // inner value. Any other opaque handle cannot be
+                // constructed in Rust; it only arrives from JS
+                // (imports/inline).
+                {
+                    let adt = self.tcx.adt_def(*did);
+                    let sargs = subst_args(self.tcx, self.args, args);
+                    if tyutil::handle_field_ty(self.tcx, &adt, sargs).is_some() {
+                        if ops.len() == 1 {
+                            let (e, t) = self.operand_expr(&ops[FieldIdx::from_usize(0)])?;
+                            return Ok(self.maybe_fround(e, t));
+                        }
+                        self.err(format!("bad aggregate arity for handle wrapper {did:?}"));
+                        return Err(());
+                    }
+                }
+                if tyutil::is_js_opaque(self.tcx, *did) {
+                    self.err(
+                        "cannot construct opaque JS handle in Rust \
+                         (obtain it from #[js::import]/#[js::inline])"
+                            .to_string(),
+                    );
+                    return Err(());
+                }
                 let args = subst_args(self.tcx, self.args, args);
                 let adt = self.tcx.adt_def(*did);
                 let mut out = Vec::with_capacity(ops.len());
@@ -1695,7 +1777,12 @@ impl<'tcx> Emitter<'tcx> {
                             // as cells and must not be unwrapped).
                             let name = crate::get_import_name(did)
                                 .unwrap_or_else(|| "undefined".to_string());
-                            return Ok(CallTarget::JsImport { name, args: fargs });
+                            let template = is_splice_template(&name);
+                            return Ok(CallTarget::JsImport {
+                                name,
+                                args: fargs,
+                                template,
+                            });
                         }
                         // Static target known: direct call.
                         self.classify_did(*did, fargs)
@@ -1817,6 +1904,8 @@ impl<'tcx> Emitter<'tcx> {
                     Ok(CallTarget::JsImport {
                         name: format!("__js_imports.{name}"),
                         args: ty::GenericArgs::identity_for_item(self.tcx, did),
+                        // Cross-crate linkage names are never templates.
+                        template: false,
                     })
                 } else if is_closure_call {
                     Ok(CallTarget::ClosureTrait { name })
@@ -1843,15 +1932,36 @@ impl<'tcx> Emitter<'tcx> {
             Ok(Callee::Intrinsic(op)) => Ok(CallTarget::Intrinsic { op, args: fargs }),
             Ok(Callee::CtorFn) => Ok(CallTarget::CtorValue),
             Ok(Callee::JsImport(did)) => {
-                let name = crate::get_import_name(&did).unwrap_or_else(|| "undefined".to_string());
+                // Upstream method stubs live in no import map (their crate
+                // ran in another process): read the path from metadata.
+                let name = match crate::get_import_name(&did) {
+                    Some(n) => n,
+                    None => match crate::import_path_of(self.tcx, did) {
+                        Some(Ok(n)) => n,
+                        Some(Err(e)) => {
+                            self.err(e);
+                            return Err(());
+                        }
+                        None => {
+                            self.err(format!(
+                                "could not resolve import `{}`",
+                                self.tcx.def_path_str(did)
+                            ));
+                            return Err(());
+                        }
+                    },
+                };
                 // The resolver carries no args for #[js_import] extern items;
                 // use identity args as a fallback (js_import fns are typically
                 // non-generic).
+                let template = is_splice_template(&name);
                 Ok(CallTarget::JsImport {
                     name,
                     args: ty::GenericArgs::identity_for_item(self.tcx, did),
+                    template,
                 })
             }
+            Ok(Callee::JsInline(did)) => Ok(CallTarget::JsInline { did }),
             Ok(Callee::Panic(k)) => Ok(CallTarget::Panic(k)),
             Ok(Callee::FmtNew) => Ok(CallTarget::FmtNew),
             Ok(Callee::ArgNew(_)) => {
@@ -1995,6 +2105,7 @@ impl<'tcx> Emitter<'tcx> {
             CallTarget::JsImport {
                 name,
                 args: param_tys,
+                template,
             } => {
                 let mut v: Vec<String> = Vec::with_capacity(args.len());
                 for (i, arg) in args.iter().enumerate() {
@@ -2016,36 +2127,46 @@ impl<'tcx> Emitter<'tcx> {
                             _ => break,
                         }
                     }
-                    v.push(match tt.kind() {
+                    let mut e = match tt.kind() {
                         // Idempotent unwrap: cells arrive as `[str]`, but
                         // values that already passed through a deref are raw
                         // strings (unwrapping those again would take the
                         // first *character*).
                         ty::Str => format!("__str_raw({arg})"),
                         _ => arg.clone(),
-                    });
+                    };
+                    // Template imports own their call shape, so `Option`
+                    // operands map to null-or-value here (bare indirections
+                    // keep the `{t, v}` object for user JS to interpret).
+                    if *template {
+                        if let Some(ty) = tys.get(i).copied() {
+                            if let Some(u) = self.unwrap_option_splice(&e, ty) {
+                                e = u;
+                            }
+                        }
+                    }
+                    v.push(e);
                 }
                 // `name` is the emittable callee: either the shared-imports
                 // indirection (`__js_imports.<fn>`) or a true JS path from
                 // `#[js::import = "<path>"]` (called as written, so methods
-                // keep their receiver).
-                let call = format!("{name}({})", v.join(","));
-                // Foreign JS that returns an owned `String` hands back a raw
-                // JS string; wrap it in the same 1-cell holder Rust uses for
-                // `String` so callers unwrap via `[0]`.
-                let mut dt = self.subst(dest_ty);
-                loop {
-                    match dt.kind() {
-                        ty::Ref(_, inner, _) | ty::RawPtr(inner, _) => dt = *inner,
-                        _ => break,
+                // keep their receiver). An explicit template path (flagged
+                // at target creation) substitutes the (already unwrapped)
+                // argument expressions and emits the full expression.
+                let call = if *template {
+                    match substitute_splices(name, &v) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            self.err(e);
+                            return Err(());
+                        }
                     }
-                }
-                if matches!(repr_of(self.tcx, dt), Repr::BufStr) {
-                    Ok(format!("[{call}]"))
                 } else {
-                    Ok(call)
-                }
+                    format!("{name}({})", v.join(","))
+                };
+                self.wrap_js_return(call, dest_ty)
             }
+            CallTarget::JsInline { did } => self.inline_js_expr(*did, arg_ops, dest_ty),
             CallTarget::Panic(k) => self.panic_expr(*k, arg_ops, &args),
             CallTarget::Not(inner) => {
                 Ok(format!("!({})", self.call_expr(inner, arg_ops, dest_ty)?))
@@ -2062,6 +2183,415 @@ impl<'tcx> Emitter<'tcx> {
                 self.err(msg.to_string());
                 Err(())
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Inline JS (`#[js::inline]` stubs) and `$N` template substitution.
+// ---------------------------------------------------------------------------
+
+/// `true` if `s` contains a `$N` splice placeholder (`$` + ASCII digits).
+fn template_has_splice(s: &str) -> bool {
+    let mut it = s.chars().peekable();
+    while let Some(c) = it.next() {
+        if c == '$' {
+            if let Some(&d) = it.peek() {
+                if d.is_ascii_digit() {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// `true` when `name` is an explicit `#[js::import = "path"]` template rather
+/// than a `__js_imports.*` indirection: indirections (bare imports and
+/// cross-crate linkages, whose `$`-defindex suffixes only look like splices)
+/// are always plain callees.
+fn is_splice_template(name: &str) -> bool {
+    !name.starts_with("__js_imports.") && template_has_splice(name)
+}
+
+/// Substitute `$N` placeholders in `template` with `splices[N]`. A `$` not
+/// followed by digits is left as-is (jQuery `$`, `${x}` in JS template
+/// literals, etc. pass through). Out-of-range indices are an error.
+fn substitute_splices(template: &str, splices: &[String]) -> Result<String, String> {
+    let mut out = String::with_capacity(template.len() + splices.len() * 8);
+    let mut it = template.chars().peekable();
+    while let Some(c) = it.next() {
+        if c != '$' {
+            out.push(c);
+            continue;
+        }
+        let mut num = String::new();
+        while let Some(&d) = it.peek() {
+            if d.is_ascii_digit() {
+                num.push(d);
+                it.next();
+            } else {
+                break;
+            }
+        }
+        if num.is_empty() {
+            out.push('$');
+            continue;
+        }
+        let idx: usize = num
+            .parse()
+            .map_err(|_| format!("bad splice placeholder ${num}"))?;
+        match splices.get(idx) {
+            Some(s) => out.push_str(s),
+            None => {
+                return Err(format!(
+                    "splice ${idx} out of range (template takes {} argument(s))",
+                    splices.len()
+                ));
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Unquote a `"..."` JS string literal produced by `constval::js_string`.
+fn unquote_js_string(lit: &str) -> Option<String> {
+    if lit.len() < 2 || !lit.starts_with('"') || !lit.ends_with('"') {
+        return None;
+    }
+    let inner = &lit[1..lit.len() - 1];
+    let mut out = String::with_capacity(inner.len());
+    let mut it = inner.chars();
+    while let Some(c) = it.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match it.next()? {
+            '"' => out.push('"'),
+            '\\' => out.push('\\'),
+            'n' => out.push('\n'),
+            'r' => out.push('\r'),
+            't' => out.push('\t'),
+            '0' => out.push('\0'),
+            'u' => {
+                if it.next()? != '{' {
+                    return None;
+                }
+                let mut hex = String::new();
+                for h in it.by_ref() {
+                    if h == '}' {
+                        break;
+                    }
+                    hex.push(h);
+                }
+                let cp = u32::from_str_radix(&hex, 16).ok()?;
+                out.push(char::from_u32(cp)?);
+            }
+            _ => return None,
+        }
+    }
+    Some(out)
+}
+
+/// Safety gate for inline templates (bundles inline into HTML `<script>`):
+/// forbid tag-breaking sequences and cap length. Newlines, backticks and
+/// `${` are allowed (raw JS); `$N` splices are substituted before emission.
+fn validate_inline_template(t: &str) -> Option<String> {
+    if t.len() > 8192 {
+        return Some("inline-JS template is too long (max 8192 bytes)".to_string());
+    }
+    let lower = t.to_lowercase();
+    for bad in ["</script", "<!--"] {
+        if lower.contains(bad) {
+            return Some(format!("inline-JS template contains forbidden {bad:?}"));
+        }
+    }
+    None
+}
+
+impl<'tcx> Emitter<'tcx> {
+    /// Emit a `#[js::inline]` stub call: the first operand is the `&str`
+    /// template, the rest are `$N` splices. Return wrapping mirrors imports
+    /// (owned `String` results arrive raw and are cell-wrapped).
+    fn inline_js_expr(
+        &mut self,
+        did: DefId,
+        arg_ops: &[Spanned<mir::Operand<'tcx>>],
+        dest_ty: Ty<'tcx>,
+    ) -> Result<String, ()> {
+        let _ = did;
+        if arg_ops.is_empty() {
+            self.err("#[js::inline] stub needs a `&str` template argument".to_string());
+            return Err(());
+        }
+        let template = self.peer_inline_template(arg_ops[0].node.clone())?;
+        if let Some(e) = validate_inline_template(&template) {
+            self.err(e);
+            return Err(());
+        }
+        // Render splices: `Option` maps to null-or-value; string-like
+        // values unwrap idempotently so both `&str` (raw) and `String`
+        // (cell) splice as JS strings.
+        let mut splices = Vec::with_capacity(arg_ops.len().saturating_sub(1));
+        for sp in arg_ops.iter().skip(1) {
+            let (e, t) = self.operand_expr(&sp.node)?;
+            if let Some(u) = self.unwrap_option_splice(&e, t) {
+                splices.push(u);
+                continue;
+            }
+            let mut inner = self.subst(t);
+            loop {
+                match inner.kind() {
+                    ty::Ref(_, i, _) | ty::RawPtr(i, _) => inner = *i,
+                    _ => break,
+                }
+            }
+            let is_string = matches!(inner.kind(), ty::Str)
+                || matches!(repr_of(self.tcx, inner), Repr::BufStr);
+            splices.push(if is_string {
+                format!("__str_raw({e})")
+            } else {
+                e
+            });
+        }
+        let code = match substitute_splices(&template, &splices) {
+            Ok(s) => s,
+            Err(e) => {
+                self.err(e);
+                return Err(());
+            }
+        };
+        self.wrap_js_return(code, dest_ty)
+    }
+
+    /// Follow an inline-JS template operand back to its `&str` literal value.
+    fn peer_inline_template(&mut self, op: mir::Operand<'tcx>) -> Result<String, ()> {
+        let op = self.strip_deref(op)?;
+        match op {
+            mir::Operand::Constant(c) => self.const_str_value(c.const_),
+            mir::Operand::Copy(p) | mir::Operand::Move(p) => {
+                if p.projection.is_empty() {
+                    match self.find_assign(p.local)? {
+                        Some(mir::Rvalue::Use(inner, _)) => self.peer_inline_template(inner),
+                        Some(mir::Rvalue::Ref(_, _, inner)) => {
+                            self.peer_inline_template(mir::Operand::Copy(inner))
+                        }
+                        Some(rv) => {
+                            self.err(format!(
+                                "inline-JS template must be a string literal, found {rv:?}"
+                            ));
+                            Err(())
+                        }
+                        None => {
+                            self.err(
+                                "inline-JS template must be a string literal".to_string(),
+                            );
+                            Err(())
+                        }
+                    }
+                } else {
+                    self.err("inline-JS template must be a plain string literal".to_string());
+                    Err(())
+                }
+            }
+            mir::Operand::RuntimeChecks(_) => {
+                self.err("bad inline-JS template".to_string());
+                Err(())
+            }
+        }
+    }
+
+    /// Read the value of a `&str`/`str` constant.
+    fn const_str_value(&mut self, c: mir::Const<'tcx>) -> Result<String, ()> {
+        use mir::ConstValue;
+        let ty = self.subst(c.ty());
+        let is_str = matches!(ty.kind(), ty::Str)
+            || matches!(ty.kind(), ty::Ref(_, inner, _) if matches!(inner.kind(), ty::Str));
+        if !is_str {
+            self.err(format!("inline-JS template must be `&str`, found {ty}"));
+            return Err(());
+        }
+        match c {
+            mir::Const::Val(ConstValue::Slice { alloc_id, meta }, _) => {
+                let bytes = self.read_alloc(alloc_id, 0, meta)?;
+                String::from_utf8(bytes).map_err(|_| {
+                    self.err("inline-JS template is not valid UTF-8".to_string());
+                })
+            }
+            mir::Const::Unevaluated(uc, _) => {
+                let args = tyutil::subst_unchecked(self.tcx, self.args, uc.args);
+                let uc = mir::UnevaluatedConst {
+                    def: uc.def,
+                    args,
+                    promoted: uc.promoted,
+                };
+                match self
+                    .tcx
+                    .const_eval_resolve(mono_env(), uc, self.cur_span)
+                {
+                    Ok(ConstValue::Slice { alloc_id, meta }) => {
+                        let bytes = self.read_alloc(alloc_id, 0, meta)?;
+                        String::from_utf8(bytes).map_err(|_| {
+                            self.err("inline-JS template is not valid UTF-8".to_string());
+                        })
+                    }
+                    _ => {
+                        self.err("inline-JS template must be a string literal".to_string());
+                        Err(())
+                    }
+                }
+            }
+            _ => {
+                // Last resort: render as a JS literal and unquote it.
+                let ccx = self.ccx();
+                match constval::render_mir_const(&ccx, c) {
+                    Ok(lit) => unquote_js_string(&lit).ok_or_else(|| {
+                        self.err("inline-JS template must be a string literal".to_string());
+                    }),
+                    Err(e) => {
+                        self.err(e);
+                        Err(())
+                    }
+                }
+            }
+        }
+    }
+
+    /// Map an `Option` operand to a JS null-or-value expression for
+    /// generated call shapes (template imports, inline splices):
+    /// `None` becomes `undefined`, `Some` unwraps (cells idempotently).
+    /// Returns `None` when `ty` is not an `Option`. The operand is always
+    /// a MIR place or constant (side-effect-free), so mentioning it twice
+    /// is sound.
+    fn unwrap_option_splice(&mut self, expr: &str, ty: Ty<'tcx>) -> Option<String> {
+        let inner = self.option_payload(ty)?;
+        let (_, none_d) = self.opt_discrs(ty).ok()?;
+        let mut it = self.subst(inner);
+        loop {
+            match it.kind() {
+                ty::Ref(_, i, _) | ty::RawPtr(i, _) => it = *i,
+                _ => break,
+            }
+        }
+        let is_string = matches!(it.kind(), ty::Str)
+            || matches!(repr_of(self.tcx, it), Repr::BufStr);
+        let val = if is_string {
+            format!("__str_raw({expr}.v[0])")
+        } else {
+            format!("{expr}.v[0]")
+        };
+        Some(format!("({expr}.t==={none_d}?undefined:{val})"))
+    }
+
+    /// `Some(T)`'s payload type when `ty` (through references) is
+    /// `Option<T>`; `None` otherwise (including `Result`, which foreign
+    /// calls never auto-wrap — throwing JS is an open item).
+    fn option_payload(&mut self, ty: Ty<'tcx>) -> Option<Ty<'tcx>> {
+        let t = self.subst(ty);
+        if !tyutil::is_option_ty(self.tcx, t) {
+            return None;
+        }
+        let mut inner = t;
+        loop {
+            match inner.kind() {
+                ty::Ref(_, i, _) | ty::RawPtr(i, _) => inner = *i,
+                _ => break,
+            }
+        }
+        match inner.kind() {
+            ty::Adt(_, args) => args.iter().find_map(|a| match a.kind() {
+                ty::GenericArgKind::Type(t) => Some(self.subst(t)),
+                _ => None,
+            }),
+            _ => None,
+        }
+    }
+
+    /// Payload value expression for a `Some`/`Ok` cell: owned strings are
+    /// cell-wrapped, anything else passes through.
+    fn payload_wrap(&self, v: &str, inner: Ty<'tcx>) -> String {
+        let inner = self.subst(inner);
+        if matches!(repr_of(self.tcx, inner), Repr::BufStr) {
+            format!("[{v}]")
+        } else {
+            v.to_string()
+        }
+    }
+
+    /// `Some(...)` expression for a JS value that may be null/undefined.
+    fn some_or_none(&mut self, v: &str, opt_ty: Ty<'tcx>) -> Result<String, ()> {
+        let inner = self.option_payload(opt_ty).ok_or_else(|| {
+            self.err(format!("expected Option<T>, found {opt_ty}"));
+        })?;
+        let (some_d, none_d) = self.opt_discrs(opt_ty)?;
+        let some_val = self.payload_wrap(v, inner);
+        Ok(format!(
+            "(({v}===null||{v}===undefined)?{{t:{none_d},v:[]}}:{{t:{some_d},v:[{some_val}]}})"
+        ))
+    }
+
+    /// Wrap a foreign-JS call result per the destination type. `Result<T,
+    /// E>` captures a thrown exception as `Err` (evaluated once, via an
+    /// IIFE whose `try` also applies the `Option`/cell rules to the `Ok`
+    /// payload); `Option<T>` maps null/undefined to `None`; owned `String`
+    /// arrives raw and is cell-wrapped; anything else passes through.
+    fn wrap_js_return(&mut self, call: String, dest_ty: Ty<'tcx>) -> Result<String, ()> {
+        let mut dt = self.subst(dest_ty);
+        loop {
+            match dt.kind() {
+                ty::Ref(_, inner, _) | ty::RawPtr(inner, _) => dt = *inner,
+                _ => break,
+            }
+        }
+        if tyutil::is_result_ty(self.tcx, dt) {
+            let (ok_d, err_d) = self.res_discrs(dt)?;
+            let mut ts = match dt.kind() {
+                ty::Adt(_, args) => args.iter().filter_map(|a| match a.kind() {
+                    ty::GenericArgKind::Type(t) => Some(self.subst(t)),
+                    _ => None,
+                }),
+                _ => {
+                    self.err(format!("bad Result type {dt}"));
+                    return Err(());
+                }
+            };
+            let (ok_t, err_t) = match (ts.next(), ts.next()) {
+                (Some(a), Some(b)) => (a, b),
+                _ => {
+                    self.err(format!("bad Result type {dt}"));
+                    return Err(());
+                }
+            };
+            // The `Ok` payload reuses the value rules (including nested
+            // `Option`); the `Err` payload is the caught exception object
+            // (stringified when a `String` is expected).
+            let ok_val = if self.option_payload(ok_t).is_some() {
+                self.some_or_none("__v", ok_t)?
+            } else {
+                self.payload_wrap("__v", ok_t)
+            };
+            let err_inner = self.subst(err_t);
+            let err_val = if matches!(repr_of(self.tcx, err_inner), Repr::BufStr) {
+                "[String(__e)]".to_string()
+            } else {
+                "__e".to_string()
+            };
+            return Ok(format!(
+                "(()=>{{try{{const __v={call};return {{t:{ok_d},v:[{ok_val}]}};}}catch(__e){{return {{t:{err_d},v:[{err_val}]}};}}}})()"
+            ));
+        }
+        if self.option_payload(dt).is_some() {
+            // Evaluate the call once: bind, then map null to `None`.
+            return Ok(format!(
+                "(()=>{{const __v={call};return {}}})()",
+                self.some_or_none("__v", dt)?
+            ));
+        }
+        if matches!(repr_of(self.tcx, dt), Repr::BufStr) {
+            Ok(format!("[{call}]"))
+        } else {
+            Ok(call)
         }
     }
 }
@@ -4719,7 +5249,8 @@ impl<'tcx> Emitter<'tcx> {
             }
             Repr::Unit => Ok("{k:'u'}".to_string()),
             Repr::RawPtr | Repr::Dyn => Ok("{k:'p'}".to_string()),
-            Repr::FnVal => Ok("{k:'o'}".to_string()),
+            // Opaque JS handles format via `String(handle)`.
+            Repr::JsValue | Repr::FnVal => Ok("{k:'o'}".to_string()),
             Repr::Never | Repr::Opaque => {
                 self.err(format!("cannot format value of type {ty}"));
                 Err(())
@@ -5113,6 +5644,12 @@ impl<'tcx> Emitter<'tcx> {
                     Ok(v) => v,
                     Err(_) => return,
                 };
+                if matches!(repr_of(self.tcx, self.subst(ty)), Repr::JsValue) {
+                    self.err(format!(
+                        "cannot match on opaque JS handle {ty} (compare it with == instead)"
+                    ));
+                    return;
+                }
                 let is_big = matches!(repr_of(self.tcx, ty), Repr::Big(_));
                 let is_bool = matches!(repr_of(self.tcx, ty), Repr::Bool);
                 self.out.push_str(&format!("switch({e}){{\n"));
@@ -5423,6 +5960,13 @@ impl<'tcx> Emitter<'tcx> {
     fn switch_parts(&mut self, bb: usize) -> Result<(String, Ty<'tcx>), ()> {
         let discr = self.switch_discr(bb)?;
         let (e, ty) = self.operand_expr(&discr)?;
+        // Opaque JS handles have no Rust-visible discriminant.
+        if matches!(repr_of(self.tcx, self.subst(ty)), Repr::JsValue) {
+            self.err(format!(
+                "cannot match on opaque JS handle {ty} (compare it with == instead)"
+            ));
+            return Err(());
+        }
         Ok((e, ty))
     }
 

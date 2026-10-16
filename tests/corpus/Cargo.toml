@@ -2,4 +2,4 @@
 # (`sh tests/diff.sh` builds them all).
 [workspace]
 resolver = "2"
-members = ["arith", "boundary", "collections", "enums", "ffi_chars", "ints", "traits"]
+members = ["arith", "boundary", "collections", "dom", "domjs", "enums", "ffi_chars", "ints", "traits"]

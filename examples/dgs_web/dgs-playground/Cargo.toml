@@ -8,3 +8,4 @@ crate-type = ["rlib"]
 
 [dependencies]
 dgs = { version = "0.1", default-features = false }
+dom = { path = "../../../support/dom" }

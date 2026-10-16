@@ -102,14 +102,132 @@ The boundary is opt-in per item:
   as a type-coercing wrapper (`export function _js_<name>(...)`) plus a plain
   re-export alias (`export { _js_<name> as <name> }`), so the public name is
   the alias, not a direct `export function <name>`. Parameter/return types must be
-  in the allowed set: `f64`, `i32`, `u32`, `bool`, `String`, `&str`, and
-  `()` (void). Generic boundary functions are rejected.
-- `#[js::import]` on a foreign function, or on its enclosing `extern "C"`
-  block — declares a function drawn from `globalThis.__js_imports.<name>`
-  at run time. Same type restrictions as exports.
+  in the allowed set: `f64`, `i32`, `u32`, `bool`, `String`, `&str`,
+  `#[js::opaque]` handles (as `any`), and `()` (void). Generic boundary
+  functions are rejected.
+- `#[js::import]` on a foreign function, on its enclosing `extern "C"`
+  block, or on an `impl`-block/free-function stub — declares a function
+  drawn from `globalThis.__js_imports.<name>` at run time. Same type
+  restrictions as exports, plus `Option<T>` returns (null maps to `None`).
+- `#[js::import = "<path>"]` calls the true JS function at `<path>`
+  directly. The path may contain `$N` placeholders (`$0`, `$1`, ...) for the
+  function's parameters, in which case it is emitted as a full expression:
+  `#[js::import = "$0.replaceChildren()"]` on `fn clear(el: &Element)` emits
+  `el.replaceChildren()`. Write templates with bare `$N` (no surrounding
+  quotes): string arguments already arrive as JS strings, so `"...$0..."`
+  would double-quote them. A `$` not followed by digits is left alone.
 - `String` parameters arrive from JS **wrapped in a 1-cell array**
   (`[string]`); the wrapper is transparent to Rust code. A `String` **return**
   is unwrapped at the wrapper boundary. `&str` returns are plain JS strings.
+
+## DOM API (`support/dom`)
+
+The `support/dom` crate is the typed DOM API (web-sys naming, direct
+object references instead of an externref table). One path dependency,
+no `extern` blocks, no unsafe:
+
+```toml
+[dependencies]
+dom = { path = "../support/dom" }
+```
+
+```rust
+use dom::document;
+
+let stage = document().get_element_by_id("stage").expect("missing #stage");
+stage.set_inner_html("<b>hi</b>");
+```
+
+- Handles (`Window`, `Document`, `Element`, ...) are transparent
+  newtypes over `js_support::JsValue`: wrapping and `.0` are free,
+  `Clone`/`Copy`/`PartialEq` behave as identity, and nothing is ever
+  serialized. They cross `#[js::import]`/`#[js::export]` as `any` and
+  compose inside `Option`/`Vec`/etc.
+- Every method binds the true JS operation through a `$N`-template
+  `#[js::import]` on the `impl` block — no host shims, no generated
+  glue. Nullable DOM reads return `Option` (null/undefined maps to
+  `None` at the call site).
+- A true zero-import builtin (like `asm!`) is impossible for an
+  out-of-tree backend: builtins expand inside rustc before codegen ever
+  runs. (`asm!` itself cannot serve either: its operands must be
+  machine-register types, so `&str`/`String`/handles are rejected at
+  typeck and results can only come back through integer registers.)
+  Vendoring real `web-sys` sources is likewise out: they presuppose
+  wasm-bindgen's runtime ABI (u32-slab `JsValue`, refcounted `Closure`,
+  `(ptr, len)` strings through linear memory, CLI-generated glue) —
+  porting that means reimplementing their backend, not scripting edits.
+  Mirroring their *names* over direct references is the honest subset.
+
+Do not name your own crate `js`: the extern crate would shadow the `js`
+tool namespace and `#[js::export]` would stop resolving.
+
+Handle semantics: assignment copies the reference; `Clone` is identity;
+`==`/`!=` is reference identity (`===`/`!==`); `Drop` is a no-op (do not
+`impl Drop` for one); multi-field opaque structs can only be passed
+through opaquely (no construction, no field access, no `match`);
+`format!` renders a handle via `String(handle)`.
+
+Fallible imports return `Result<T, E>`: a thrown JS exception becomes
+`Err` (the caught object, stringified when `E` is `String`); the `Ok`
+payload reuses the value rules, including nested `Option`. This mirrors
+web-sys's `catch` methods exactly (`closest`, `query_selector`, ...).
+
+Open DOM items: `Option` *parameters* are rejected (no `None`→null
+coercion — pass `&str`); callbacks are capture-free `fn` only (no
+`Closure<dyn FnMut>` — needs trait-object support).
+
+On vendoring web-sys: its sources presuppose wasm-bindgen's runtime ABI
+(u32-slab `JsValue`, `(ptr, len)` strings through linear memory,
+refcounted `Closure`, CLI-generated glue), so a clone-and-rename script
+cannot suffice — the `#[wasm_bindgen]` macro itself would have to be
+reimplemented to lower directly to this backend's model (name resolution
+for `method`/`getter`/`setter`/`constructor`/`js_namespace`, `extends`
+hierarchies for `JsCast`, dictionaries, string/int enums), plus shims
+for `JsValue`/`JsCast`/`Closure` and a `js_sys` subset, version-locked
+to web-sys's vocabulary. The two backend prerequisites for that road
+(`catch`→`Result`, transparent newtypes) are landed; the macro itself
+remains future work. Until then, `support/dom` mirrors web-sys naming
+over direct references.
+
+## Bring-your-own interop (`#[js::opaque]` / `#[js::inline]`)
+
+Without the support crates, the same machinery works crate-locally
+(needs `#![register_tool(js)]`):
+
+```rust
+#[js::opaque]
+#[derive(Clone, Copy, PartialEq)]
+pub struct Element;
+
+extern "C" {
+    #[js::import = "document.getElementById($0)"]
+    fn get_element(id: &str) -> Element;
+    #[js::import = "$0.replaceChildren()"]
+    fn el_clear(el: &Element);
+}
+```
+
+`#[js::import]` also works directly on `impl` methods and free-function
+stubs (same `$N` rules; bodies never emit). A generic stub annotated
+`#[js::inline]` is peered at each call site and never emitted — its
+first `&str` argument must be a string literal (the template), the rest
+are `$N` splices — for ad-hoc inline JS without any declaration:
+
+```rust
+#[js::inline]
+unsafe fn js1<T, A0>(_: &str, _: A0) -> T {
+    panic!("js intrinsic")
+}
+
+let tag: String = unsafe { js1("document.getElementById($0).tagName", "cmd") };
+```
+
+String splices unwrap idempotently (`&str` and `String` both splice as
+JS strings; write bare `$N`, never `"...$N..."`); `String` results
+arrive cell-wrapped exactly like `#[js::import]` returns. In statement
+position the return type cannot be inferred, so write
+`let _: () = ...`. Templates must not contain `</script` or `<!--`
+(the bundle inlines into HTML) and are capped at 8192 bytes.
 
 ## Destructors
 
@@ -192,6 +310,11 @@ Packages:
   drop ordering (scope-exit, no-op destructors).
 - `boundary` — `#[js::import]`/`#[js::export]` type boundary (imports resolved
   from `globalThis.__js_imports`, exports re-exported to JS).
+- `dom` — opaque handles, `$N`-template imports, and `#[js::inline]` inline
+  JS against a faked `document` (see `run.js`).
+- `domjs` — the same exercise through the upstream `dom` crate
+  (`#[js::import]` methods + `Option` returns peering via attribute
+  metadata, `--extern` forwarding in `corpus_build.rs`).
 
 ## Open items (not yet implemented)
 
@@ -207,5 +330,6 @@ Packages:
 - `derive` beyond what lowers to recognized shims (no `PartialEq`/`Eq` trait
   vtable path; equality is structural via `__deep_eq`).
 - Full `std::collections::hash::` / `btree::` families.
-- Foreign imports other than the tiny accepted signature set.
+- Foreign imports other than the tiny accepted signature set (now including
+  `#[js::opaque]` handles as `any`).
 - `cargo test` harness (only the custom differential harness exists).

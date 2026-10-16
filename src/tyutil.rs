@@ -76,6 +76,10 @@ pub enum Repr {
     Enum,
     /// JS function value.
     FnVal,
+    /// Opaque JS object handle (`#[js::opaque]` struct, e.g. a DOM node).
+    /// Passed by reference directly, never serialized; `Clone` is identity,
+    /// equality is `===`, `Drop` is a no-op.
+    JsValue,
     /// Same value as the pointee/inner (`&T`, `&mut T`, `Box`, `Rc`, `Arc`).
     Transparent,
     /// `undefined` (`()`, ZSTs).
@@ -397,6 +401,130 @@ pub fn is_box_adt(tcx: TyCtxt<'_>, did: DefId) -> bool {
     tcx.is_lang_item(did, LangItem::OwnedBox)
 }
 
+/// `true` if `did` carries the `#[js::<name>]` tool attribute, whether it is
+/// defined in the local crate (HIR) or upstream (crate metadata, e.g. the
+/// `js_support` crate). The crate defining the item needs
+/// `#![register_tool(js)]`.
+pub fn has_js_attr(tcx: TyCtxt<'_>, did: DefId, name: &str) -> bool {
+    let path = [
+        rustc_span::Symbol::intern("js"),
+        rustc_span::Symbol::intern(name),
+    ];
+    if let Some(local) = did.as_local() {
+        let hir_id = tcx.local_def_id_to_hir_id(local);
+        if tcx.hir_attrs(hir_id).iter().any(|a| a.path_matches(&path)) {
+            return true;
+        }
+    }
+    // Upstream items (and anything HIR misses): encoded attributes.
+    // (Bound to a bool first so the query's temporary drops before `path`.)
+    let found = tcx.get_attrs_by_path(did, &path).next().is_some();
+    found
+}
+
+/// `true` if `did` names a `#[js::opaque]` ADT (an opaque JS object handle
+/// such as a DOM node).
+pub fn is_js_opaque(tcx: TyCtxt<'_>, did: DefId) -> bool {
+    has_js_attr(tcx, did, "opaque")
+}
+
+/// `true` if `did` names a `#[js::inline]` function stub (a peered inline-JS
+/// intrinsic whose first `&str` argument is the template and whose remaining
+/// arguments are `$N` splices).
+pub fn is_js_inline(tcx: TyCtxt<'_>, did: DefId) -> bool {
+    has_js_attr(tcx, did, "inline")
+}
+
+/// Peel `&T`/`&mut T` (references are transparent in this backend).
+pub fn peel_ref<'tcx>(ty: Ty<'tcx>) -> Ty<'tcx> {
+    let mut t = ty;
+    loop {
+        match t.kind() {
+            ty::Ref(_, inner, _) => t = *inner,
+            _ => return t,
+        }
+    }
+}
+
+/// `true` if `ty` (through references) is an opaque JS handle.
+pub fn is_js_value_ty<'tcx>(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>) -> bool {
+    is_js_value_ty_inner(tcx, ty, 0)
+}
+
+fn is_js_value_ty_inner<'tcx>(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>, depth: u8) -> bool {
+    // Depth-guarded: recursive wrappers (`struct A(Box<A>)`) would cycle.
+    if depth > 16 {
+        return false;
+    }
+    match peel_ref(ty).kind() {
+        ty::Adt(def, args) => {
+            is_js_opaque(tcx, def.did())
+                || handle_field_ty_inner(tcx, def, args, depth).is_some()
+        }
+        _ => false,
+    }
+}
+
+/// Field type if `def` (with `args`) is a transparent single-field handle
+/// wrapper: a non-enum struct with exactly one field whose type is itself
+/// a JS handle. Backs structural transparency — a macro-generated `pub
+/// struct Element(pub JsValue)` behaves as its handle with no attribute.
+/// `None` otherwise (including multi-field `#[js::opaque]` structs, which
+/// stay uninspectable objects).
+pub fn handle_field_ty<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    def: &ty::AdtDef<'tcx>,
+    args: ty::GenericArgsRef<'tcx>,
+) -> Option<Ty<'tcx>> {
+    handle_field_ty_inner(tcx, def, args, 0)
+}
+
+fn handle_field_ty_inner<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    def: &ty::AdtDef<'tcx>,
+    args: ty::GenericArgsRef<'tcx>,
+    depth: u8,
+) -> Option<Ty<'tcx>> {
+    if depth > 16 || def.is_enum() {
+        return None;
+    }
+    // Field count first: no queries for ordinary structs.
+    if def.non_enum_variant().fields.len() != 1 {
+        return None;
+    }
+    let f = &def.non_enum_variant().fields[FieldIdx::from_usize(0)];
+    let fty = subst_unchecked(tcx, args, tcx.type_of(f.did).skip_binder());
+    is_js_value_ty_inner(tcx, fty, depth + 1).then_some(fty)
+}
+
+/// `true` if `ty` (through references) is std `Option<_>`.
+pub fn is_option_ty<'tcx>(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>) -> bool {
+    match peel_ref(ty).kind() {
+        ty::Adt(def, _) => {
+            is_std_item(tcx, def.did())
+                && {
+                    let p = def_path(tcx, def.did());
+                    p.ends_with("option::Option") || p == "Option"
+                }
+        }
+        _ => false,
+    }
+}
+
+/// `true` if `ty` (through references) is std `Result<_, _>`.
+pub fn is_result_ty<'tcx>(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>) -> bool {
+    match peel_ref(ty).kind() {
+        ty::Adt(def, _) => {
+            is_std_item(tcx, def.did())
+                && {
+                    let p = def_path(tcx, def.did());
+                    p.ends_with("result::Result") || p == "Result"
+                }
+        }
+        _ => false,
+    }
+}
+
 /// Last path segment of an ADT, or `None` for non-ADTs.
 fn adt_last_segment<'tcx>(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>) -> Option<String> {
     let ty = match ty.kind() {
@@ -483,7 +611,18 @@ pub fn repr_of<'tcx>(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>) -> Repr {
         ty::Str => Repr::Str,
         ty::Array(..) | ty::Slice(..) => Repr::Array,
         ty::Tuple(..) => Repr::Tuple,
-        ty::Adt(def, _args) => {
+        ty::Adt(def, args) => {
+            // Transparent single-field handle wrappers behave as their
+            // field (with or without the `#[js::opaque]` mark).
+            if let Some(fty) = handle_field_ty(tcx, def, args) {
+                return repr_of(tcx, fty);
+            }
+            // Opaque JS handles win over every other rule (including the
+            // ZST/`Unit` fallback below: a field-less `#[js::opaque]` struct
+            // is a live object reference, not `undefined`).
+            if is_js_opaque(tcx, def.did()) {
+                return Repr::JsValue;
+            }
             if def.is_box() || is_box_adt(tcx, def.did()) {
                 return Repr::Transparent;
             }

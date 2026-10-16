@@ -1490,6 +1490,10 @@ function __res_unwrap_or_else(x, ok, dfltFn, env) {
     return x.t === ok ? x.v[0] : dfltFn(env, x.v[0]);
 }
 // Deep structural copy used by `Clone` for our object representations.
+// Backend-produced values are arrays (structs/tuples/vecs) or `{t, v}`
+// enums; any other object is an opaque JS handle (e.g. a DOM node from
+// `#[js::opaque]`) and is passed through by reference — copying its keys
+// into a plain object would detach it from its prototype.
 function __clone(x) {
     if (x === null || typeof x !== "object") {
         return x;
@@ -1505,9 +1509,5 @@ function __clone(x) {
     if (x.t !== undefined && Array.isArray(x.v)) {
         return { t: x.t, v: x.v.map(__clone) };
     }
-    const o = {};
-    for (const k of Object.keys(x)) {
-        o[k] = __clone(x[k]);
-    }
-    return o;
+    return x;
 }
