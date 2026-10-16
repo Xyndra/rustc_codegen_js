@@ -42,7 +42,7 @@ jobs:
             examples/dgs_web -> examples/dgs_web/target
 
       - name: Install cargo-build-js
-        run: cargo install --path tools/cargo-build-js
+        run: cargo install --path tools/cargo-build-js --force
 
       - name: Build backend and examples/dgs_web with codegen backend
         run: cargo build-js --manifest-path examples/dgs_web/Cargo.toml -p dgs-site --release
