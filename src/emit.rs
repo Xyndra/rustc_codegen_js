@@ -2172,6 +2172,17 @@ impl<'tcx> Emitter<'tcx> {
                     }
                     v.push(e);
                 }
+                // `closure_to_js_function` is a compiler intrinsic: instead
+                // of calling it, lower the closure argument to a JavaScript
+                // function that invokes the closure's generated body with its
+                // captured environment.
+                if name.contains("closure_to_js_function") {
+                    let cname = self.closure_name_of_ty(tys[0])?;
+                    return Ok(format!(
+                        "(function(...args){{ return {cname}({}, ...args); }})",
+                        args[0]
+                    ));
+                }
                 // `name` is the emittable callee: either the shared-imports
                 // indirection (`__js_imports.<fn>`) or a true JS path from
                 // `#[js::import = "<path>"]` (called as written, so methods
