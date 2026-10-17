@@ -1,0 +1,4 @@
+[submodule "support/compat"]
+	path = support/compat
+	url = https://github.com/Xyndra/rustc_codegen_js.git
+	branch = compat

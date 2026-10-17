@@ -1859,6 +1859,8 @@ impl<'tcx> Emitter<'tcx> {
     ) -> Result<CallTarget<'tcx>, ()> {
         match resolved {
             Ok(Callee::Direct(inst)) => {
+                let (nm, _) = fn_name_crate(self, &inst);
+                let _ = nm;
                 // A trait-method call (`Fn::call`, ...) resolving to a closure
                 // body carries (env, args-tuple): spread the tuple.
                 let is_closure_call = match inst.def {
@@ -2065,6 +2067,14 @@ impl<'tcx> Emitter<'tcx> {
         let args: Vec<String> = ae.iter().map(|(e, _)| e.clone()).collect();
         let tys: Vec<Ty<'tcx>> = ae.iter().map(|(_, t)| *t).collect();
         match target {
+            CallTarget::Direct { name } if name.contains("closure_to_js_function") => {
+                let arg_ty = tys.get(0).copied().unwrap_or(dest_ty);
+                let cname = self.closure_name_of_ty(arg_ty).unwrap_or_else(|_| "undefined".to_string());
+                Ok(format!(
+                    "(function(...args){{ return {cname}({}, ...args); }})",
+                    ae[0].0
+                ))
+            }
             CallTarget::Direct { name } => Ok(format!("{name}({})", args.join(","))),
             CallTarget::ClosureDirect { name, env } => {
                 // A closure is called as (env, args...): env is the captured
@@ -2135,6 +2145,21 @@ impl<'tcx> Emitter<'tcx> {
                         ty::Str => format!("__str_raw({arg})"),
                         _ => arg.clone(),
                     };
+                    // A Rust closure passed to a foreign/JS-imported
+                    // function is lowered to a JavaScript function that
+                    // invokes the closure's generated body with its captured
+                    // environment, so DOM/event callbacks can be expressed in
+                    // Rust without a hand-written JS wrapper.
+                    if let Some(ty) = tys.get(i).copied() {
+                        let ty = self.subst(ty);
+                        if matches!(ty.kind(), ty::Closure(..)) {
+                            let name = self.closure_name_of_ty(ty)?;
+                            e = format!(
+                                "(function(...args){{ return {name}({}, ...args); }})",
+                                e
+                            );
+                        }
+                    }
                     // Template imports own their call shape, so `Option`
                     // operands map to null-or-value here (bare indirections
                     // keep the `{t, v}` object for user JS to interpret).
