@@ -77,11 +77,6 @@ pub fn on_key(
 ) -> String {
     let w = window_fn().unwrap();
     let d = w.document().unwrap();
-    let state = js0::<JsValue>("globalThis.__wsysState");
-    let renderer: JsValue = js1("$0[0]", state);
-    let root: JsValue = js1("$0[1]", state);
-    let camera: JsValue = js1("$0[2]", state);
-    let cube: JsValue = js1("$0[3]", state);
     let k = key.to_lowercase();
     let message = match k.as_str() {
         "arrowleft" | "a" => {
