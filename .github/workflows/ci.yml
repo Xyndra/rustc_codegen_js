@@ -62,7 +62,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Build wsys site with codegen backend
-        run: cargo build-js --manifest-path examples/wsys/Cargo.toml --release
+        run: cargo build-js --manifest-path examples/wsys/Cargo.toml -p wsys-site --release
         env:
           RUST_LOG: info
 
