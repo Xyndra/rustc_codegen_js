@@ -2,29 +2,28 @@ use regex::Regex;
 use site_builder::{process_site, split_runtime};
 use std::path::PathBuf;
 
-const SITE_DIR: &str = "dgs-playground";
-const TEMPLATE: &str = "../dgs-playground/index.html";
-const DGS_PKG: &str = "dgs";
-const PG_PKG: &str = "dgs-playground";
-
 fn combine(bundles: Vec<String>) -> String {
     let (runtime_raw, mut dgs_raw2) = split_runtime(&bundles[0]);
-    let (_, mut pg_raw2) = split_runtime(&bundles[1]);
+    let (_, mut dom_raw2) = split_runtime(&bundles[1]);
+    let (_, mut pg_raw2) = split_runtime(&bundles[2]);
     if let Some(idx) = dgs_raw2.rfind("// ---- exports ----") {
         dgs_raw2 = dgs_raw2[..idx].trim_end().to_string();
+    }
+    if let Some(idx) = dom_raw2.rfind("// ---- exports ----") {
+        dom_raw2 = dom_raw2[..idx].trim_end().to_string();
     }
     pg_raw2 = Regex::new(r"[^\n]*globalThis\.__js_imports[^;]*;\n?")
         .unwrap()
         .replace_all(&pg_raw2, "")
         .to_string();
-
     let mut combined = String::new();
     combined.push_str(&runtime_raw);
     combined.push('\n');
     combined.push_str(&dgs_raw2);
     combined.push('\n');
+    combined.push_str(&dom_raw2);
+    combined.push('\n');
     combined.push_str(&pg_raw2);
-
     combined = combined.replace("const __js_imports = globalThis.__js_imports ?? {};", "");
     combined = format!(
         "const __js_imports = globalThis.__js_imports ?? {{}};\n{}",
@@ -45,8 +44,8 @@ fn main() {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     process_site(
         manifest,
-        SITE_DIR,
-        TEMPLATE,
+        "dgs-playground",
+        "../dgs-playground/index.html",
         "/*BUNDLE*/",
         &[
             "../dgs-playground/index.html",
@@ -55,10 +54,10 @@ fn main() {
             "../dgs-playground/build.rs",
         ],
         true,
-        &[(DGS_PKG, "dgs.mjs"), (PG_PKG, "dgs_playground.mjs")],
+        &[("dgs", "dgs.mjs"), ("dom", "dom.mjs"), ("dgs-playground", "dgs_playground.mjs")],
         true,
         &[
-            "function _js_init(",
+            "_js_init",
             "replaceChildren(",
             "insertAdjacentHTML(",
             "addEventListener(",
