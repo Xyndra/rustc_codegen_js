@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>wsys (rustc_codegen_js)</title>
+        <style>
+            body { font-family: system-ui, sans-serif; max-width: 64rem; margin: 2rem auto; padding: 0 1rem; }
+            #status { color: #555; min-height: 1.2em; margin: .5rem 0; }
+            canvas { border: 1px solid #ccc; display: block; max-width: 100%; }
+            textarea { width: 100%; box-sizing: border-box; }
+        </style>
+    </head>
+    <body>
+        <h1>wsys: real web-sys + Three.js</h1>
+        <p>Rust drives all interaction. Arrow keys / WASD move the cube.</p>
+        <div id="status">booting...</div>
+        <div id="stage"></div>
+        <textarea id="notes" rows="4"></textarea>
+
+        <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+        <script type="module">
+            /*BUNDLE*/
+        </script>
+    </body>
+</html>

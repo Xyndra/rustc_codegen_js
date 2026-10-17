@@ -1,0 +1,14 @@
+[package]
+name = "wsys-site"
+version = "0.0.0"
+edition = "2021"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+wsys = { version = "0.1.0", path = ".." }
+
+[build-dependencies]
+site-builder = { path = "../../../support/site-builder" }
+regex = "1"

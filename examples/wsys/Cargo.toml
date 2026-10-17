@@ -1,0 +1,18 @@
+[package]
+name = "wsys"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+js_util = { path = "../../support/js_util" }
+web-sys = { version = "=0.3.80", default-features = false, features = ["Window", "Document", "Element", "HtmlTextAreaElement", "EventTarget", "KeyboardEvent"] }
+js-sys = { version = "=0.3.80", default-features = false }
+
+[patch.crates-io]
+web-sys = { path = "../../support/compat/web-sys" }
+js-sys = { path = "../../support/compat/js-sys" }
+wasm-bindgen = { path = "../../support/compat/wasm-bindgen" }
+
+[workspace]
+resolver = "2"
+members = ["wsys-site"]

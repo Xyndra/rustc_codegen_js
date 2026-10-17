@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Cache Rust toolchain
         uses: actions/cache@v4
@@ -40,6 +42,7 @@ jobs:
           workspaces: |
             . -> target
             examples/dgs_web -> examples/dgs_web/target
+            examples/wsys -> examples/wsys/target
 
       - name: Install cargo-build-js
         run: cargo install --path tools/cargo-build-js --force
@@ -56,6 +59,20 @@ jobs:
           name: dgs-playground-site
           path: |
             examples/dgs_web/target/release/dgs-playground/
+          if-no-files-found: warn
+
+      - name: Build wsys site with codegen backend
+        run: cargo build-js --manifest-path examples/wsys/Cargo.toml --release
+        env:
+          RUST_LOG: info
+
+      - name: Upload wsys site
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wsys-site
+          path: |
+            examples/wsys/target/release/wsys-site/
           if-no-files-found: warn
 
       - name: Run corpus differential tests
