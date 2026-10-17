@@ -1,0 +1,11 @@
+#![allow(unused_imports)]
+#![allow(clippy::all)]
+#[doc = "The `RtcDegradationPreference` enum."]
+#[doc = ""]
+#[doc = "*This API requires the following crate features to be activated: `RtcDegradationPreference`*"]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RtcDegradationPreference {
+    MaintainFramerate = "maintain-framerate",
+    MaintainResolution = "maintain-resolution",
+    Balanced = "balanced",
+}

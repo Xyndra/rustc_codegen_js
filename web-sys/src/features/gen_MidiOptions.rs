@@ -1,0 +1,55 @@
+#![allow(unused_imports)]
+#![allow(clippy::all)]
+use super::*;
+use ::wasm_bindgen::JsValue;
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[doc = "The `MidiOptions` dictionary."]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `MidiOptions`*"]
+#[js::opaque]
+#[derive(Copy)]
+pub struct MidiOptions(pub ::wasm_bindgen::JsValue);
+    #[doc = "Get the `software` field of this object."]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `MidiOptions`*"]
+#[js::import = "None"]
+pub fn get_software(this: &MidiOptions) -> Option<bool> { panic!("web-sys intrinsic") }
+    #[doc = "Change the `software` field of this object."]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `MidiOptions`*"]
+#[js::import = "None = $1"]
+pub fn set_software(this: &MidiOptions, val: bool) { panic!("web-sys intrinsic") }
+    #[doc = "Get the `sysex` field of this object."]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `MidiOptions`*"]
+#[js::import = "None"]
+pub fn get_sysex(this: &MidiOptions) -> Option<bool> { panic!("web-sys intrinsic") }
+    #[doc = "Change the `sysex` field of this object."]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `MidiOptions`*"]
+#[js::import = "None = $1"]
+pub fn set_sysex(this: &MidiOptions, val: bool) { panic!("web-sys intrinsic") }
+impl MidiOptions {
+    #[doc = "Construct a new `MidiOptions`."]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `MidiOptions`*"]
+#[js::import = "None"]
+pub fn new() -> Self { #[allow(unused_mut)] let mut ret: Self = ::wasm_bindgen::JsCast::unchecked_into(::js_sys::Object::new()) { panic!("web-sys intrinsic") }
+        ret
+    }
+    #[deprecated = "Use `set_software()` instead."]
+#[js::import = "None"]
+pub fn software(&mut self, val: bool) -> &mut Self { self.set_software(val) { panic!("web-sys intrinsic") }
+        self
+    }
+    #[deprecated = "Use `set_sysex()` instead."]
+#[js::import = "None"]
+pub fn sysex(&mut self, val: bool) -> &mut Self { self.set_sysex(val) { panic!("web-sys intrinsic") }
+        self
+    }
+}
+impl Default for MidiOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}

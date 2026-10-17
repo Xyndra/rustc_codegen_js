@@ -1,0 +1,12 @@
+[package]
+name = "wasm-bindgen"
+version = "0.2.103"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+js_util = { path = "../../js_util" }
+
+[lib]
+name = "wasm_bindgen"
+path = "src/lib.rs"

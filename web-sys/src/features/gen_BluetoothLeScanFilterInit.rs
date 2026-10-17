@@ -1,0 +1,154 @@
+#![allow(unused_imports)]
+#![allow(clippy::all)]
+use super::*;
+use ::wasm_bindgen::JsValue;
+#[cfg(web_sys_unstable_apis)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[doc = "The `BluetoothLeScanFilterInit` dictionary."]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `BluetoothLeScanFilterInit`*"]
+    #[doc = ""]
+    #[doc = "*This API is unstable and requires `--cfg=web_sys_unstable_apis` to be activated, as"]
+    #[doc = "[described in the `wasm-bindgen` guide](https://wasm-bindgen.github.io/wasm-bindgen/web-sys/unstable-apis.html)*"]
+#[js::opaque]
+#[derive(Copy)]
+pub struct BluetoothLeScanFilterInit(pub ::wasm_bindgen::JsValue);
+    #[cfg(web_sys_unstable_apis)]
+    #[doc = "Get the `manufacturerData` field of this object."]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `BluetoothLeScanFilterInit`*"]
+    #[doc = ""]
+    #[doc = "*This API is unstable and requires `--cfg=web_sys_unstable_apis` to be activated, as"]
+    #[doc = "[described in the `wasm-bindgen` guide](https://wasm-bindgen.github.io/wasm-bindgen/web-sys/unstable-apis.html)*"]
+#[js::import = "None"]
+pub fn get_manufacturer_data(this: &BluetoothLeScanFilterInit) -> Option<::js_sys::Object> { panic!("web-sys intrinsic") }
+    #[cfg(web_sys_unstable_apis)]
+    #[doc = "Change the `manufacturerData` field of this object."]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `BluetoothLeScanFilterInit`*"]
+    #[doc = ""]
+    #[doc = "*This API is unstable and requires `--cfg=web_sys_unstable_apis` to be activated, as"]
+    #[doc = "[described in the `wasm-bindgen` guide](https://wasm-bindgen.github.io/wasm-bindgen/web-sys/unstable-apis.html)*"]
+#[js::import = "None = $1"]
+pub fn set_manufacturer_data(this: &BluetoothLeScanFilterInit, val: &::js_sys::Object) { panic!("web-sys intrinsic") }
+    #[cfg(web_sys_unstable_apis)]
+    #[doc = "Get the `name` field of this object."]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `BluetoothLeScanFilterInit`*"]
+    #[doc = ""]
+    #[doc = "*This API is unstable and requires `--cfg=web_sys_unstable_apis` to be activated, as"]
+    #[doc = "[described in the `wasm-bindgen` guide](https://wasm-bindgen.github.io/wasm-bindgen/web-sys/unstable-apis.html)*"]
+#[js::import = "None"]
+pub fn get_name(this: &BluetoothLeScanFilterInit) -> Option<::alloc::string::String> { panic!("web-sys intrinsic") }
+    #[cfg(web_sys_unstable_apis)]
+    #[doc = "Change the `name` field of this object."]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `BluetoothLeScanFilterInit`*"]
+    #[doc = ""]
+    #[doc = "*This API is unstable and requires `--cfg=web_sys_unstable_apis` to be activated, as"]
+    #[doc = "[described in the `wasm-bindgen` guide](https://wasm-bindgen.github.io/wasm-bindgen/web-sys/unstable-apis.html)*"]
+#[js::import = "None = $1"]
+pub fn set_name(this: &BluetoothLeScanFilterInit, val: &str) { panic!("web-sys intrinsic") }
+    #[cfg(web_sys_unstable_apis)]
+    #[doc = "Get the `namePrefix` field of this object."]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `BluetoothLeScanFilterInit`*"]
+    #[doc = ""]
+    #[doc = "*This API is unstable and requires `--cfg=web_sys_unstable_apis` to be activated, as"]
+    #[doc = "[described in the `wasm-bindgen` guide](https://wasm-bindgen.github.io/wasm-bindgen/web-sys/unstable-apis.html)*"]
+#[js::import = "None"]
+pub fn get_name_prefix(this: &BluetoothLeScanFilterInit) -> Option<::alloc::string::String> { panic!("web-sys intrinsic") }
+    #[cfg(web_sys_unstable_apis)]
+    #[doc = "Change the `namePrefix` field of this object."]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `BluetoothLeScanFilterInit`*"]
+    #[doc = ""]
+    #[doc = "*This API is unstable and requires `--cfg=web_sys_unstable_apis` to be activated, as"]
+    #[doc = "[described in the `wasm-bindgen` guide](https://wasm-bindgen.github.io/wasm-bindgen/web-sys/unstable-apis.html)*"]
+#[js::import = "None = $1"]
+pub fn set_name_prefix(this: &BluetoothLeScanFilterInit, val: &str) { panic!("web-sys intrinsic") }
+    #[cfg(web_sys_unstable_apis)]
+    #[doc = "Get the `serviceData` field of this object."]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `BluetoothLeScanFilterInit`*"]
+    #[doc = ""]
+    #[doc = "*This API is unstable and requires `--cfg=web_sys_unstable_apis` to be activated, as"]
+    #[doc = "[described in the `wasm-bindgen` guide](https://wasm-bindgen.github.io/wasm-bindgen/web-sys/unstable-apis.html)*"]
+#[js::import = "None"]
+pub fn get_service_data(this: &BluetoothLeScanFilterInit) -> Option<::js_sys::Object> { panic!("web-sys intrinsic") }
+    #[cfg(web_sys_unstable_apis)]
+    #[doc = "Change the `serviceData` field of this object."]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `BluetoothLeScanFilterInit`*"]
+    #[doc = ""]
+    #[doc = "*This API is unstable and requires `--cfg=web_sys_unstable_apis` to be activated, as"]
+    #[doc = "[described in the `wasm-bindgen` guide](https://wasm-bindgen.github.io/wasm-bindgen/web-sys/unstable-apis.html)*"]
+#[js::import = "None = $1"]
+pub fn set_service_data(this: &BluetoothLeScanFilterInit, val: &::js_sys::Object) { panic!("web-sys intrinsic") }
+    #[cfg(web_sys_unstable_apis)]
+    #[doc = "Get the `services` field of this object."]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `BluetoothLeScanFilterInit`*"]
+    #[doc = ""]
+    #[doc = "*This API is unstable and requires `--cfg=web_sys_unstable_apis` to be activated, as"]
+    #[doc = "[described in the `wasm-bindgen` guide](https://wasm-bindgen.github.io/wasm-bindgen/web-sys/unstable-apis.html)*"]
+#[js::import = "None"]
+pub fn get_services(this: &BluetoothLeScanFilterInit) -> Option<::js_sys::Array> { panic!("web-sys intrinsic") }
+    #[cfg(web_sys_unstable_apis)]
+    #[doc = "Change the `services` field of this object."]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `BluetoothLeScanFilterInit`*"]
+    #[doc = ""]
+    #[doc = "*This API is unstable and requires `--cfg=web_sys_unstable_apis` to be activated, as"]
+    #[doc = "[described in the `wasm-bindgen` guide](https://wasm-bindgen.github.io/wasm-bindgen/web-sys/unstable-apis.html)*"]
+#[js::import = "None = $1"]
+pub fn set_services(this: &BluetoothLeScanFilterInit, val: &::wasm_bindgen::JsValue) { panic!("web-sys intrinsic") }
+#[cfg(web_sys_unstable_apis)]
+impl BluetoothLeScanFilterInit {
+    #[doc = "Construct a new `BluetoothLeScanFilterInit`."]
+    #[doc = ""]
+    #[doc = "*This API requires the following crate features to be activated: `BluetoothLeScanFilterInit`*"]
+    #[doc = ""]
+    #[doc = "*This API is unstable and requires `--cfg=web_sys_unstable_apis` to be activated, as"]
+    #[doc = "[described in the `wasm-bindgen` guide](https://wasm-bindgen.github.io/wasm-bindgen/web-sys/unstable-apis.html)*"]
+#[js::import = "None"]
+pub fn new() -> Self { #[allow(unused_mut)] let mut ret: Self = ::wasm_bindgen::JsCast::unchecked_into(::js_sys::Object::new()) { panic!("web-sys intrinsic") }
+        ret
+    }
+    #[cfg(web_sys_unstable_apis)]
+    #[deprecated = "Use `set_manufacturer_data()` instead."]
+#[js::import = "None"]
+pub fn manufacturer_data(&mut self, val: &::js_sys::Object) -> &mut Self { self.set_manufacturer_data(val) { panic!("web-sys intrinsic") }
+        self
+    }
+    #[cfg(web_sys_unstable_apis)]
+    #[deprecated = "Use `set_name()` instead."]
+#[js::import = "None"]
+pub fn name(&mut self, val: &str) -> &mut Self { self.set_name(val) { panic!("web-sys intrinsic") }
+        self
+    }
+    #[cfg(web_sys_unstable_apis)]
+    #[deprecated = "Use `set_name_prefix()` instead."]
+#[js::import = "None"]
+pub fn name_prefix(&mut self, val: &str) -> &mut Self { self.set_name_prefix(val) { panic!("web-sys intrinsic") }
+        self
+    }
+    #[cfg(web_sys_unstable_apis)]
+    #[deprecated = "Use `set_service_data()` instead."]
+#[js::import = "None"]
+pub fn service_data(&mut self, val: &::js_sys::Object) -> &mut Self { self.set_service_data(val) { panic!("web-sys intrinsic") }
+        self
+    }
+    #[cfg(web_sys_unstable_apis)]
+    #[deprecated = "Use `set_services()` instead."]
+#[js::import = "None"]
+pub fn services(&mut self, val: &::wasm_bindgen::JsValue) -> &mut Self { self.set_services(val) { panic!("web-sys intrinsic") }
+        self
+    }
+}
+#[cfg(web_sys_unstable_apis)]
+impl Default for BluetoothLeScanFilterInit {
+    fn default() -> Self {
+        Self::new()
+    }
+}

@@ -1,0 +1,14 @@
+#![allow(unused_imports)]
+#![allow(clippy::all)]
+#[doc = "The `ResponseType` enum."]
+#[doc = ""]
+#[doc = "*This API requires the following crate features to be activated: `ResponseType`*"]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResponseType {
+    Basic = "basic",
+    Cors = "cors",
+    Default = "default",
+    Error = "error",
+    Opaque = "opaque",
+    Opaqueredirect = "opaqueredirect",
+}
