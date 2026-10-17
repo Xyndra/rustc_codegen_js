@@ -8,6 +8,7 @@ crate-type = ["rlib"]
 
 [dependencies]
 wsys = { version = "0.1.0", path = ".." }
+js_util = { version = "0.1.0", path = "../../../support/js_util" }
 
 [build-dependencies]
 site-builder = { path = "../../../support/site-builder" }
