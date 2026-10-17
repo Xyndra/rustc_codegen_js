@@ -13,8 +13,6 @@ crate-type = ["rlib"]
 # those would link natively into build.rs, but under `cargo build-js`
 # their rlibs are JavaScript stubs.
 dgs-playground = { version = "0.1.0", path = "../dgs-playground" }
-dgs = { version = "0.1", default-features = false }
-dom = { version = "0.1.0", path = "../../../support/dom" }
 
 [build-dependencies]
 site-builder = { path = "../../../support/site-builder" }
