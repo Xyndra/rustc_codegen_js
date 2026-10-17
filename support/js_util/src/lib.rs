@@ -26,6 +26,8 @@
 #![feature(register_tool)]
 #![register_tool(js)]
 #![allow(dead_code)]
+extern crate alloc;
+use core::fmt::Write;
 
 /// Opaque JS object handle: a DOM node, canvas context, or any other live
 /// JS value. Only manipulable through inline JS (or `$N`-template
@@ -84,4 +86,32 @@ pub fn js3<T, A0, A1, A2>(_: &str, _: A0, _: A1, _: A2) -> T {
 #[js::inline]
 pub fn js4<T, A0, A1, A2, A3>(_: &str, _: A0, _: A1, _: A2, _: A3) -> T {
     panic!("js intrinsic (only meaningful under rustc_codegen_js)")
+}
+
+
+
+
+#[js::export]
+#[js::export]
+pub fn register_keydown(window: JsValue) {
+    let _: () = js1(
+        "$0.addEventListener('keydown', function(e){ return _js_on_key(String(e.key)); })",
+        window,
+    );
+}
+
+
+#[macro_export]
+macro_rules! register_keydown {
+    ($window:expr) => {
+        let _: () = js1(
+            "$0.addEventListener('keydown', function(e){ return _js_on_key(String(e.key)); })",
+            $window,
+        );
+    };
+}
+
+pub fn closure_to_js_function<F>(f: F) -> JsValue {
+    let _ = f;
+    panic!("closure_to_js_function intrinsic")
 }
