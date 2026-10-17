@@ -16,10 +16,5 @@ dgs-playground = { version = "0.1.0", path = "../dgs-playground" }
 dgs = { version = "0.1", default-features = false }
 
 [build-dependencies]
-oxc_minifier = "0.154.0"
-oxc_allocator = "0.154.0"
-oxc_parser = "0.154.0"
-oxc_span = "0.154.0"
-oxc_codegen = "0.154.0"
-oxc_mangler = "0.154.0"
+site-builder = { path = "../../../support/site-builder" }
 regex = "1"
