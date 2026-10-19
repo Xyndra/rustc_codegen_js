@@ -77,3 +77,68 @@ jobs:
 
       - name: Run corpus differential tests
         run: sh tests/diff.sh
+
+  framework:
+    name: Framework demo
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Cache Rust toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            ~/.rustup
+          key: rust-toolchain-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}
+          restore-keys: rust-toolchain-${{ runner.os }}-
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-09-15
+          components: rustc-dev rust-src
+
+      - name: Cache cargo build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            framework -> framework/target
+
+      - name: Install cargo-build-js
+        run: cargo install --path tools/cargo-build-js --force
+
+      - name: Install cargo-site
+        run: cargo install --path tools/cargo-site --force
+
+      - name: Test framework crates
+        run: cargo test --manifest-path framework/Cargo.toml --workspace
+
+      - name: Build demo site
+        run: cargo site build --manifest-path framework/examples/demo-app/Cargo.toml
+        env:
+          RUST_LOG: info
+
+      - name: Smoke-test demo site
+        run: |
+          set -euo pipefail
+          BUNDLES_DIR=framework/target/release/demo-app-bundles \
+            framework/target/release/demo-app 127.0.0.1:8099 &
+          server=$!
+          trap 'kill "$server" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 50); do
+            if curl -fsS http://127.0.0.1:8099/ >/dev/null; then break; fi
+            sleep 0.2
+          done
+          curl -fsS http://127.0.0.1:8099/ > /tmp/demo.html
+          grep -q 'text-2xl' /tmp/demo.html
+          grep -q 'DOMContentLoaded' /tmp/demo.html
+          ! grep -Eq '<link[^>]+tailwind\.css' /tmp/demo.html
+          curl -fsS http://127.0.0.1:8099/assets/tailwind.css | grep -q 'bg-red-500'

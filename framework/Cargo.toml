@@ -1,0 +1,31 @@
+[workspace]
+members = [
+  "core",
+  "render",
+  "server",
+  "ssr",
+  "rpc",
+  "tailwind",
+  "framework",
+  "macros",
+  "crates/fw_router",
+  "examples/demo-app",
+]
+exclude = ["tailwind-build"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+version = "0.1.0"
+
+[workspace.dependencies]
+fw_core = { path = "core" }
+fw_render = { path = "render" }
+fw_router = { path = "crates/fw_router" }
+fw_server = { path = "server" }
+fw_ssr = { path = "ssr" }
+fw_rpc = { path = "rpc" }
+fw_tailwind = { path = "tailwind" }
+framework = { path = "framework" }
+fw_macros = { path = "macros" }

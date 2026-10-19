@@ -1,0 +1,10 @@
+{
+  "name": "demo-app-e2e",
+  "private": true,
+  "scripts": {
+    "test": "node test.cjs"
+  },
+  "dependencies": {
+    "puppeteer": "^24.0.0"
+  }
+}

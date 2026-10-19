@@ -1,0 +1,15 @@
+{
+  "name": "tailwind-integration",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tailwindcss -c tailwind.full.config.js -i ./src/input.css -o ./styles-full.css",
+    "watch": "tailwindcss -c tailwind.full.config.js -i ./src/input.css -o ./styles-full.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.17",
+    "@tailwindcss/typography": "^0.5.15",
+    "@tailwindcss/forms": "^0.5.9"
+  }
+}

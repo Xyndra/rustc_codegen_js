@@ -1,0 +1,10 @@
+[package]
+name = "fw_core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "fw_core"
+
+[dependencies]

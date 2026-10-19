@@ -1,0 +1,15 @@
+[package]
+name = "cargo-site"
+version = "0.1.0"
+edition = "2021"
+description = "Build and run rustc_codegen_js sites"
+
+[[bin]]
+name = "cargo-site"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+regex = "1"
+site-builder = { path = "../../support/site-builder" }
+fw_tailwind_build = { path = "../../framework/tailwind-build" }

@@ -1,0 +1,12 @@
+[package]
+name = "fw_ssr"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "fw_ssr"
+
+[dependencies]
+fw_core = { path = "../core" }
+fw_router = { path = "../crates/fw_router" }

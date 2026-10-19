@@ -1,0 +1,23 @@
+[package]
+name = "framework"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "framework"
+
+[features]
+default = []
+macros = ["dep:fw_macros"]
+
+[dependencies]
+fw_core = { path = "../core" }
+fw_render = { path = "../render" }
+fw_router = { path = "../crates/fw_router" }
+fw_server = { path = "../server" }
+fw_ssr = { path = "../ssr" }
+fw_rpc = { path = "../rpc" }
+fw_tailwind = { path = "../tailwind" }
+fw_macros = { path = "../macros", optional = true }
+anyhow = "1"

@@ -28,3 +28,6 @@ codegen-config.toml
 
 # generated codegen backend config
 .cargo/
+
+# JS deps
+node_modules/

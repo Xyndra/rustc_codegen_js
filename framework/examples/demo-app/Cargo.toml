@@ -1,0 +1,30 @@
+[package]
+name = "demo-app"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["client"]
+client = ["dep:fw_core", "dep:fw_render", "dep:js_util", "dep:fw_tailwind", "dep:fw_macros", "dep:web-sys"]
+page_home = ["client"]
+page_about = ["client"]
+page_contact = ["client"]
+server = ["client", "page_home", "page_about", "page_contact", "dep:fw_server", "dep:fw_ssr", "dep:fw_rpc", "dep:fw_router", "dep:fw_macros", "dep:framework", "dep:anyhow", "dep:brotli"]
+
+[dependencies]
+fw_core = { path = "../../core", optional = true }
+fw_render = { path = "../../render", default-features = false, optional = true }
+fw_router = { path = "../../crates/fw_router", optional = true }
+fw_server = { path = "../../server", optional = true }
+fw_ssr = { path = "../../ssr", optional = true }
+fw_rpc = { path = "../../rpc", optional = true }
+fw_tailwind = { path = "../../tailwind", optional = true }
+fw_macros = { path = "../../macros", optional = true }
+framework = { path = "../../framework", optional = true }
+js_util = { path = "../../../support/js_util", optional = true }
+web-sys = { path = "../../../support/compat/web-sys", default-features = false, features = ["Window", "Document", "Element", "EventTarget", "Event"], optional = true }
+anyhow = { version = "1", optional = true }
+brotli = { version = "8", optional = true }
+
+[package.metadata.site]
+pages = ["home", "about", "contact"]

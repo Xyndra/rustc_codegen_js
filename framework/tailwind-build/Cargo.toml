@@ -1,0 +1,22 @@
+[package]
+name = "fw_tailwind_build"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Native Tailwind CSS splitter (critical/lazy) used by framework build scripts"
+publish = false
+
+# Standalone workspace on purpose: this crate is a host build-dependency and
+# must never be compiled with the rustc_codegen_js backend.
+[workspace]
+
+[dependencies]
+lightningcss = "=1.0.0-alpha.72"
+
+[lib]
+name = "fw_tailwind_build"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tailwind-split"
+path = "src/main.rs"

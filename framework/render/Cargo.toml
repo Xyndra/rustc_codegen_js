@@ -1,0 +1,15 @@
+[package]
+name = "fw_render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "fw_render"
+
+[dependencies]
+js_util = { path = "../../support/js_util", optional = true }
+
+[features]
+default = []
+web = ["js_util"]

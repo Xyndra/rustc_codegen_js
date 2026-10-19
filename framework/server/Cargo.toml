@@ -1,0 +1,23 @@
+[package]
+name = "fw_server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "fw_server"
+
+[dependencies]
+fw_router = { path = "../crates/fw_router" }
+anyhow = "1"
+flate2 = "1"
+brotli = "8"
+zstd = "0.13"
+libc = "0.2"
+
+[features]
+default = ["io_uring"]
+io_uring = []
+
+[dev-dependencies]
+fw_router = { path = "../crates/fw_router" }

@@ -1,0 +1,11 @@
+[package]
+name = "fw_router"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "fw_router"
+
+[dependencies]
+inventory = "0.3"

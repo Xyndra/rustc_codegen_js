@@ -1,4 +1,5 @@
 use oxc_allocator::Allocator;
+use regex::Regex;
 use oxc_codegen::{Codegen, CodegenOptions};
 use oxc_minifier::{
     CompressOptions, MangleOptions, MangleOptionsKeepNames as MK, Minifier, MinifierOptions,
@@ -86,6 +87,28 @@ pub fn split_runtime(text: &str) -> (String, String) {
     let runtime = text[line_start..end].to_string();
     let rest = format!("{}{}", &text[..line_start], &text[end..]);
     (runtime, rest)
+}
+
+/// Concatenates the per-crate JS bundles emitted by `cargo build-js` into one
+/// script: a single copy of the runtime preamble, then every crate body with
+/// its exports stripped, finished by a single `_js_init()` call.
+pub fn combine_bundles(bundles: &[String]) -> String {
+    let (runtime, _) = split_runtime(&bundles[0]);
+    let mut combined = String::new();
+    combined.push_str(&runtime);
+    combined.push('\n');
+    for raw in bundles {
+        let (_, rest) = split_runtime(raw);
+        combined.push_str(&rest);
+        combined.push('\n');
+    }
+    combined = combined.replace("const __js_imports = globalThis.__js_imports ?? {};", "");
+    combined = format!("const __js_imports = globalThis.__js_imports ?? {{}};\n{combined}");
+    combined = combined.replace("export function ", "function ");
+    let re = Regex::new(r"(?m)^\s*export\s*\{[^}]*\};?\s*$").unwrap();
+    combined = re.replace_all(&combined, "").to_string();
+    combined = combined.replace("export ", "");
+    format!("{combined}\n_js_init();")
 }
 
 pub fn minify_js(text: &str, script: bool, top_level: bool) -> String {
